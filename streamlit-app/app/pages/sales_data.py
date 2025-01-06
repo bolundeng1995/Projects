@@ -1,53 +1,114 @@
 import streamlit as st
-from streamlit_option_menu import option_menu
-from app.pages import home, people_data, product_data, sales_data
-from app.utils.load_css import load_css  # CSS loader function
+import pandas as pd
+import plotly.express as px
+from app.utils.data_loader import load_sales_data
 
-# Load custom CSS
-load_css()
 
-# First Layer (Main Menu)
-selected_main = option_menu(
-    menu_title=None,
-    options=["Main Menu", "Reports", "Settings"],
-    icons=["house", "file-earmark-bar-graph", "gear"],
-    menu_icon="cast",
-    default_index=0,
-    orientation="horizontal",
-    styles={
-        "container": {"padding": "0", "background-color": "#ffffff"},
-        "nav-link": {"font-size": "16px", "text-align": "center", "margin": "0px"},
-        "nav-link-selected": {"background-color": "#4CAF50", "color": "white"},
-    },
-)
+def show():
+    """Display the sales data page with an elegant blue-green color scheme and two graphs in a row."""
+    st.title("Sales Data Visualization")
 
-# Second Layer (Submenus)
-if selected_main == "Main Menu":
-    selected_sub = option_menu(
-        menu_title="Main Menu",
-        options=["Home", "People Data", "Product Data", "Sales Data"],
-        icons=["house", "people", "cart", "graph-up"],
-        menu_icon="list",
-        default_index=0,
-        orientation="horizontal",
-        styles={
-            "container": {"padding": "0", "background-color": "#f8f9fa"},
-            "nav-link": {"font-size": "14px", "text-align": "center", "margin": "0px"},
-            "nav-link-selected": {"background-color": "#4CAF50", "color": "white"},
-        },
+    # Load the sales data
+    df = load_sales_data()
+
+    # Display the dataset
+    st.subheader("Complete Sales Data")
+    st.dataframe(df)
+
+    # Sidebar Filters
+    st.sidebar.header("Filters")
+    regions = st.sidebar.multiselect("Select Region(s):", options=df["Region"].unique(), default=df["Region"].unique())
+    products = st.sidebar.multiselect("Select Product(s):", options=df["Product"].unique(),
+                                      default=df["Product"].unique())
+    date_range = st.sidebar.date_input(
+        "Select Date Range:",
+        value=(df["Date"].min(), df["Date"].max()),
+        min_value=df["Date"].min(),
+        max_value=df["Date"].max()
     )
 
-    # Route to sub-pages
-    if selected_sub == "Home":
-        home.show()
-    elif selected_sub == "People Data":
-        people_data.show()
-    elif selected_sub == "Product Data":
-        product_data.show()
-    elif selected_sub == "Sales Data":
-        sales_data.show()
+    # Apply filters
+    filtered_df = df[
+        (df["Region"].isin(regions)) &
+        (df["Product"].isin(products)) &
+        (df["Date"] >= pd.to_datetime(date_range[0])) &
+        (df["Date"] <= pd.to_datetime(date_range[1]))
+        ]
 
-elif selected_main == "Reports":
-    st.title("Reports Section")
-elif selected_main == "Settings":
-    st.title("Settings")
+    # Display filtered data
+    st.subheader("Filtered Data")
+    st.write(f"Showing {len(filtered_df)} rows")
+    st.dataframe(filtered_df)
+
+    # Summary Statistics
+    st.subheader("Summary Statistics")
+    st.write(f"**Total Sales:** ${filtered_df['Sales'].sum():,.2f}")
+    st.write(f"**Average Sales per Transaction:** ${filtered_df['Sales'].mean():,.2f}")
+
+    # Graphs with Blue-Green Color Scheme
+    st.subheader("Visualizations with Blue-Green Theme")
+
+    # Columns for Bar Chart and Line Chart
+    col1, col2 = st.columns(2)
+
+    # Bar Chart: Sales by Region
+    with col1:
+        st.markdown("### Sales by Region")
+        region_sales = filtered_df.groupby("Region")["Sales"].sum().reset_index()
+        fig = px.bar(
+            region_sales,
+            x="Region",
+            y="Sales",
+            text="Sales",
+            color="Region",
+            color_discrete_sequence=px.colors.qualitative.Set2,  # Blue-Green color palette
+            title="Sales by Region"
+        )
+        fig.update_traces(texttemplate="%{text:.2s}", textposition="outside")
+        fig.update_layout(
+            plot_bgcolor="#F9F9F9",  # Light gray background for the graph
+            paper_bgcolor="#FFFFFF",  # White outer background
+            font_color="#333333",  # Dark gray text
+            yaxis=dict(title="Sales ($)", showgrid=False, color="#333333"),
+            xaxis=dict(color="#333333"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Line Chart: Sales Over Time
+    with col2:
+        st.markdown("### Sales Over Time")
+        time_sales = filtered_df.groupby("Date")["Sales"].sum().reset_index()
+        fig = px.line(
+            time_sales,
+            x="Date",
+            y="Sales",
+            markers=True,
+            line_shape="spline",
+            color_discrete_sequence=["#2E8B57"],  # Green line
+            title="Sales Over Time"
+        )
+        fig.update_layout(
+            plot_bgcolor="#F9F9F9",  # Light gray background for the graph
+            paper_bgcolor="#FFFFFF",  # White outer background
+            font_color="#333333",  # Dark gray text
+            yaxis=dict(title="Sales ($)", showgrid=False, color="#333333"),
+            xaxis=dict(color="#333333"),
+        )
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Pie Chart: Sales Distribution by Product
+    st.markdown("### Sales Distribution by Product")
+    product_sales = filtered_df.groupby("Product")["Sales"].sum().reset_index()
+    fig = px.pie(
+        product_sales,
+        values="Sales",
+        names="Product",
+        title="Sales by Product",
+        color_discrete_sequence=px.colors.sequential.Blues  # Blue gradient for the pie chart
+    )
+    fig.update_layout(
+        plot_bgcolor="#F9F9F9",  # Light gray background for the graph
+        paper_bgcolor="#FFFFFF",  # White outer background
+        font_color="#333333",  # Dark gray text
+    )
+    st.plotly_chart(fig, use_container_width=True)

@@ -1,25 +1,32 @@
+/* General styling */
 body {
-    background-color: #f5f5f5; /* Light gray background */
+    background-color: #000000; /* Black background */
+    color: #FFFFFF; /* White text */
     font-family: Arial, sans-serif;
 }
 
-h1, h2, h3 {
-    color: #4CAF50; /* Green headings */
-}
-
-.sidebar .sidebar-content {
-    background-color: #333333; /* Dark sidebar background */
-    color: white; /* Sidebar text color */
-}
-
-button {
-    background-color: #4CAF50; /* Green buttons */
-    color: white;
+/* Navbar styling */
+.stButton>button {
+    background-color: #FF0000; /* Red buttons */
+    color: #FFFFFF; /* White text */
+    border-radius: 5px;
     border: none;
     padding: 10px;
-    border-radius: 5px;
 }
 
-button:hover {
-    background-color: #45a049; /* Darker green on hover */
+.stButton>button:hover {
+    background-color: #CC0000; /* Darker red on hover */
+    color: #FFFFFF;
+}
+
+/* Headers */
+h1, h2, h3 {
+    color: #FF0000; /* Red headings */
+}
+
+/* Dataframe styling */
+.dataframe {
+    background-color: #1A1A1A; /* Dark gray background for tables */
+    color: #FFFFFF; /* White text */
+    border: 1px solid #FF0000; /* Red borders */
 }
