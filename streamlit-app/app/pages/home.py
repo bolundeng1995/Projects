@@ -7,4 +7,4 @@ def show():
     This is a basic Streamlit app with multiple pages.
     Use the sidebar to navigate between different sections.
     """)
-    st.image("app/static/images/welcome.png", caption="Welcome Image", use_column_width=True)
+    st.image("app/static/images/sg.png", caption="SG Image", use_container_width=True)

@@ -1,22 +1,25 @@
-import streamlit as st
-from app.pages import home, people_data, product_data
+body {
+    background-color: #f5f5f5; /* Light gray background */
+    font-family: Arial, sans-serif;
+}
 
-def load_css(css_file):
-    """Load and apply a CSS file."""
-    with open(css_file, "r") as f:
-        st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+h1, h2, h3 {
+    color: #4CAF50; /* Green headings */
+}
 
-# Load custom CSS
-load_css("app/static/css/style.css")
+.sidebar .sidebar-content {
+    background-color: #333333; /* Dark sidebar background */
+    color: white; /* Sidebar text color */
+}
 
-# Sidebar navigation
-st.sidebar.title("Navigation")
-tab = st.sidebar.radio("Go to:", ["Home", "People Data", "Product Data"])
+button {
+    background-color: #4CAF50; /* Green buttons */
+    color: white;
+    border: none;
+    padding: 10px;
+    border-radius: 5px;
+}
 
-# Page routing
-if tab == "Home":
-    home.show()
-elif tab == "People Data":
-    people_data.show()
-elif tab == "Product Data":
-    product_data.show()
+button:hover {
+    background-color: #45a049; /* Darker green on hover */
+}

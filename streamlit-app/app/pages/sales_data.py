@@ -19,7 +19,6 @@ selected_main = option_menu(
         "nav-link": {"font-size": "16px", "text-align": "center", "margin": "0px"},
         "nav-link-selected": {"background-color": "#4CAF50", "color": "white"},
     },
-    key="main_menu",  # Unique key for the main menu
 )
 
 # Second Layer (Submenus)
@@ -36,7 +35,6 @@ if selected_main == "Main Menu":
             "nav-link": {"font-size": "14px", "text-align": "center", "margin": "0px"},
             "nav-link-selected": {"background-color": "#4CAF50", "color": "white"},
         },
-        key="submenu_main",  # Unique key for the submenu
     )
 
     # Route to sub-pages

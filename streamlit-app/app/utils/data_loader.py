@@ -17,3 +17,13 @@ def load_product_data():
         "Stock": [10, 25, 15]
     }
     return pd.DataFrame(data)
+
+def load_sales_data():
+    """Load sample sales data."""
+    data = {
+        "Date": pd.date_range(start="2023-01-01", periods=10),
+        "Region": ["North", "South", "East", "West", "North", "South", "East", "West", "North", "South"],
+        "Product": ["Laptop", "Smartphone", "Tablet", "Smartwatch", "Laptop", "Smartphone", "Tablet", "Smartwatch", "Laptop", "Smartphone"],
+        "Sales": [1500, 2000, 1200, 800, 1800, 2200, 1400, 900, 2000, 2500],
+    }
+    return pd.DataFrame(data)
