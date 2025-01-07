@@ -1,16 +1,29 @@
 from outlook_email.email_sender import OutlookEmailSender
+from datetime import datetime, timedelta
 
 if __name__ == "__main__":
-    # Create an instance of the OutlookEmailSender class
     email_sender = OutlookEmailSender()
 
-    # Configure email details
-    to = "example@example.com"
-    subject = "Test Email from Python"
-    body = "This is a test email sent via Outlook using Python."
+    # Email details
+    to = "recipient@example.com"
+    subject = "Advanced Email Features Test"
+    body = "This is a test email with advanced features."
     cc = "cc@example.com"
     bcc = "bcc@example.com"
-    attachments = ["C:\\path\\to\\your\\file.txt"]  # Optional
+    attachments = ["C:\\path\\to\\file.txt"]
+    delay_time = datetime.now() + timedelta(minutes=10)  # Send after 10 minutes
 
-    # Send the email
-    email_sender.send_email(to, subject, body, cc, bcc, attachments)
+    # Send the email with advanced features
+    email_sender.send_email(
+        recipient=to,
+        subject=subject,
+        body=body,
+        cc=cc,
+        bcc=bcc,
+        attachments=attachments,
+        request_read_receipt=True,
+        save_as_draft=False,
+        delay_delivery=delay_time,
+        priority="High",
+        use_signature=True,
+    )
