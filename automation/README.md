@@ -1,159 +1,132 @@
 # Python Script Scheduler
 
-## Overview
-
-The **Python Script Scheduler** is a GUI-based tool built with Python and Tkinter to automate the scheduling, execution, and monitoring of Python scripts. This application allows users to manage their Python scripts efficiently by adding them to a schedule, running them manually, and reviewing their output and logs.
+The **Python Script Scheduler** is a GUI-based tool to schedule and manage Python scripts with flexible options for execution. Users can set scripts to run at specific times daily or weekly and specify weekdays for weekly schedules. The tool saves scheduled tasks to a file (`scripts.json`) and resumes them automatically when restarted.
 
 ---
 
 ## Features
 
 - Add Python scripts to the scheduler.
-- Schedule scripts to run at specific times.
-- Run scripts immediately without scheduling.
-- View and manage scheduled jobs.
-- Display output and errors from script execution.
-- Pause, resume, and clear all scheduled jobs.
-- View execution logs for all scripts.
-- Simple and intuitive GUI.
+- Schedule scripts to run **daily** or **weekly**.
+- Specify the exact time and weekday for **weekly** schedules.
+- Automatically load and schedule tasks saved in `scripts.json`.
+- View and manage scheduled tasks via a user-friendly GUI.
+- Logs script outputs and errors for debugging.
+- Highlights scheduled scripts for better visibility.
 
 ---
 
-## Application Tabs/Buttons and Their Functions
+## Requirements
 
-### **1. Script List**
-- **Purpose:** Displays a list of all added scripts and their scheduled times.
-- **Columns:**
-  - **File Name:** The name of the Python script.
-  - **Time:** The scheduled time for the script (if applicable).
-
----
-
-### **2. Buttons**
-
-#### **Add Script**
-- **Function:** Add a new Python script to the list for scheduling or manual execution.
-- **Usage:** Opens a file dialog to select a Python file (`.py`). The selected file is added to the script list.
-
-#### **Remove Selected**
-- **Function:** Remove the selected script(s) from the list.
-- **Usage:** Select one or more scripts from the list and click this button to delete them.
-
-#### **Schedule Selected**
-- **Function:** Schedule the selected script(s) to run at a specific time.
-- **Usage:** Prompts the user to enter a time in the `HH:MM` 24-hour format. The script will then be scheduled to run daily at the specified time.
-
-#### **Run Selected Now**
-- **Function:** Immediately execute the selected script(s).
-- **Usage:** Select a script from the list and click this button to run it without scheduling.
-
-#### **Start Scheduler**
-- **Function:** Start the background scheduler to automatically run scheduled scripts at their specified times.
-- **Usage:** This must be clicked to enable automatic script execution.
-
-#### **Pause Scheduler**
-- **Function:** Pause the background scheduler temporarily.
-- **Usage:** Prevents scheduled jobs from running until resumed. This is useful if you need to make changes or troubleshoot.
-
-#### **Resume Scheduler**
-- **Function:** Resume the background scheduler after it has been paused.
-- **Usage:** Allows scheduled jobs to resume running as configured.
-
-#### **Clear Scheduled Jobs**
-- **Function:** Remove all scheduled jobs.
-- **Usage:** Clears the entire list of scheduled jobs and stops their execution.
-
-#### **Show Logs**
-- **Function:** Display a new window with execution logs for all scripts.
-- **Usage:** Use this to review when each script was executed.
-
-#### **About**
-- **Function:** Show information about the application.
-- **Usage:** Displays the version and credits for the tool.
+- Python 3.7+
+- Required Python libraries:
+  - `tkinter` (for GUI)
+  - `schedule` (for task scheduling)
+  - `subprocess` (for script execution)
 
 ---
 
-### **3. Scheduled Jobs Panel**
-- **Purpose:** Displays all currently scheduled jobs with the following details:
-  - **File Name:** The name of the script.
-  - **Scheduled Time:** The time the script is set to run.
-  - **File Location:** The full file path to the script.
+## Installation
+
+1. Clone or download the repository to your local machine.
+2. Install required libraries using pip:
+   ```bash
+   pip install schedule
+   
+## Usage
+
+1. **Run the Scheduler**:
+   ```bash
+   python scheduler.py
+   
+2. **Add a Script**:
+   - Click **Add Script** to select a Python script file.
+
+3. **Schedule a Script**:
+   - Select a script from the list and click **Schedule Selected**.
+   - Enter the time in `HH:MM` format (24-hour clock).
+   - Choose a frequency (`daily` or `weekly`).
+   - For weekly schedules, specify the weekday (e.g., "Monday").
+
+4. **Start the Scheduler**:
+   - Click **Start Scheduler** to run scheduled tasks.
+
+5. **Manage Tasks**:
+   - View tasks in the **Scheduled Jobs** section.
+   - Remove or reschedule tasks as needed.
+
+6. **Logs and Output**:
+   - View script outputs and errors in the **Logs and Output** section.
 
 ---
 
-### **4. Output Panel**
-- **Purpose:** Displays the output (or errors) of executed scripts.
-- **Details:**
-  - Shows the name of the script being executed.
-  - Displays standard output (stdout) and error messages (stderr).
+## `scripts.json` Format
+
+Scheduled scripts are saved in `scripts.json`. Example structure:
+
+```json
+[
+    {
+        "file_path": "C:/Scripts/example1.py",
+        "time": "14:30",
+        "frequency": "daily",
+        "weekday": null
+    },
+    {
+        "file_path": "C:/Scripts/example2.py",
+        "time": "16:00",
+        "frequency": "weekly",
+        "weekday": "monday"
+    }
+]
+
+- **`file_path`**: Path to the Python script.
+- **`time`**: Scheduled execution time in `HH:MM` (24-hour format).
+- **`frequency`**: Execution frequency (`daily` or `weekly`).
+- **`weekday`**: For weekly schedules, specifies the day of the week (e.g., `monday`).
 
 ---
 
-### **Logs**
-- **Purpose:** Provides a history of executed scripts.
-- **Location:** Logs are displayed in a separate window and saved in a file named `execution_logs.txt`.
+## Key Features of the GUI
+
+### Main Script List
+
+- Displays all added scripts with their file paths and scheduled times.
+- Highlights scheduled scripts in **green**.
+
+### Scheduled Jobs
+
+- Shows all active schedules with:
+  - **File Name**
+  - **Execution Time**
+  - **Frequency** and **Weekday** (for weekly tasks)
+
+### Buttons
+
+- **Add Script**: Add a Python script to the list.
+- **Remove Selected**: Remove a selected script from the scheduler.
+- **Schedule Selected**: Schedule a script with specific time and frequency.
+- **Start Scheduler**: Start running scheduled tasks.
+- **Pause Scheduler**: Pause the scheduler.
+- **Resume Scheduler**: Resume the scheduler.
+- **Clear Scheduled Jobs**: Clear all schedules.
 
 ---
 
-## Getting Started
+## Troubleshooting
 
-### **1. Run the Application**
-```bash```
-python script_scheduler.py
+- **Time Format Error**: Ensure the time is entered in `HH:MM` format (24-hour clock).
+- **Invalid Weekday**: Use valid weekday names (e.g., `monday`, `tuesday`, etc.) for weekly schedules.
+- **Logs Not Displayed**: Check `execution_logs.txt` for detailed logs.
 
-### **2. Add Scripts**
-- **Function:** Add a new Python script to the list for scheduling or manual execution.
-- **Usage:** Opens a file dialog to select a Python file (`.py`). The selected file is added to the script list.
+---
 
-### **3. Schedule a Script**
-- **Function:** Schedule the selected script(s) to run at a specific time.
-- **Usage:**
-  1. Select a script from the list and click **"Schedule Selected"**.
-  2. Enter the desired time in `HH:MM` format when prompted.
-  3. The script will be scheduled to run daily at the specified time.
+## Contribution
 
-### **4. Start Scheduler**
-- **Function:** Start the background scheduler to automatically run scheduled scripts at their specified times.
-- **Usage:** Click **"Start Scheduler"** to enable automatic execution.
+Feel free to fork this repository and submit pull requests for enhancements or bug fixes.
 
-### **5. Monitor Jobs**
-- **Function:** View and manage all scheduled jobs.
-- **Usage:** Use the **"Scheduled Jobs"** panel to:
-  - View all active jobs with details like script name, scheduled time, and file location.
-  - Monitor the progress of scheduled scripts.
+---
 
-### **6. Pause/Resume Scheduler**
-#### **Pause Scheduler**
-- **Function:** Pause the background scheduler temporarily.
-- **Usage:** Click **"Pause Scheduler"** to prevent scheduled jobs from running until resumed.
+## License
 
-#### **Resume Scheduler**
-- **Function:** Resume the background scheduler after it has been paused.
-- **Usage:** Click **"Resume Scheduler"** to allow scheduled jobs to run as configured.
-
-### **7. Clear Scheduled Jobs**
-- **Function:** Remove all scheduled jobs from the scheduler.
-- **Usage:** Click **"Clear Scheduled Jobs"** to stop all jobs and clear them from the **"Scheduled Jobs"** panel.
-
-### **8. Run Selected Now**
-- **Function:** Immediately execute the selected script(s).
-- **Usage:** Select a script from the list and click **"Run Selected Now"** to execute it without scheduling.
-
-### **9. Show Logs**
-- **Function:** View the execution history of all scripts.
-- **Usage:** Click **"Show Logs"** to open a new window displaying:
-  - A timestamp for each executed script.
-  - The name of the executed script.
-
-### **10. Output Panel**
-- **Purpose:** Displays the output (or errors) of executed scripts.
-- **Details:**
-  - Shows the name of the script being executed.
-  - Displays both standard output (stdout) and error messages (stderr).
-
-### **11. About**
-- **Function:** Show information about the application.
-- **Usage:** Click **"About"** to display details like:
-  - Application name.
-  - Version number.
-  - Credits.
+This project is open-source and licensed under the MIT License.
