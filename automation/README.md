@@ -80,6 +80,7 @@ Scheduled scripts are saved in `scripts.json`. Example structure:
     }
 ]
 
+```
 - **`file_path`**: Path to the Python script.
 - **`time`**: Scheduled execution time in `HH:MM` (24-hour format).
 - **`frequency`**: Execution frequency (`daily` or `weekly`).
