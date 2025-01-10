@@ -1,13 +1,18 @@
-2025-01-09 21:19:20,873 - INFO - Scheduler thread started.
-2025-01-09 21:19:20,873 - INFO - Updating scheduler status to: Running
-2025-01-09 21:19:20,874 - INFO - Scheduler started.
-2025-01-09 21:20:00,934 - INFO - Executed script: test.py
-2025-01-09 21:21:00,025 - INFO - Executed script: test1.py
-2025-01-09 21:24:43,038 - INFO - Scheduler thread started.
-2025-01-09 21:24:43,038 - INFO - Updating scheduler status to: Running
-2025-01-09 21:24:43,038 - INFO - Scheduler started.
-2025-01-09 21:25:00,063 - INFO - Executed script: test.py
-2025-01-09 21:27:47,272 - INFO - Scheduler thread started.
-2025-01-09 21:27:47,272 - INFO - Updating scheduler status to: Running
-2025-01-09 21:27:47,273 - INFO - Scheduler started.
-2025-01-09 21:28:00,308 - INFO - Executed script: test.py
+2025-01-09 22:32:39,912 - root - INFO - Paused script: temp.py
+2025-01-09 22:32:43,065 - root - INFO - Resumed script: temp.py
+2025-01-09 22:32:43,065 - root - INFO - Resumed script: temp.py
+2025-01-09 22:36:39,977 - root - INFO - Paused script: temp.py
+2025-01-09 22:36:43,174 - root - INFO - ('I00C',)
+2025-01-09 22:36:43,174 - root - INFO - Resumed script: temp.py
+2025-01-09 22:36:43,174 - root - INFO - Resumed script: temp.py
+2025-01-09 22:37:35,491 - root - INFO - Paused script: temp.py
+2025-01-09 22:37:40,603 - root - INFO - I00C
+2025-01-09 22:37:40,604 - root - INFO - Resumed script: temp.py
+2025-01-09 22:37:40,604 - root - INFO - Resumed script: temp.py
+2025-01-09 22:39:05,082 - root - INFO - Paused script: temp.py
+2025-01-09 22:39:09,122 - root - INFO - Resumed script: temp.py
+2025-01-09 22:39:36,614 - root - INFO - Scheduler thread started.
+2025-01-09 22:39:36,614 - root - INFO - Updating scheduler status to: Running
+2025-01-09 22:39:36,615 - root - INFO - Scheduler started.
+2025-01-09 22:39:41,342 - root - INFO - Paused script: temp.py
+2025-01-09 22:39:45,883 - root - INFO - Resumed script: temp.py

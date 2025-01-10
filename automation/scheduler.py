@@ -73,22 +73,42 @@ class ScriptManager:
 
 
 class SchedulerCore:
+    def __init__(self, run_script_func):
+        """
+        Initialize the scheduler core.
 
-    def __init__(self):
+        :param run_script_func: A reference to the run_script method in SchedulerApp
+        """
         self.is_running = False  # Default state is Not Running
-        self.jobs = []
-        self.thread = None
-        self.lock = Lock()
-        self.paused_jobs = {}  # Track paused jobs by their file name
+        self.jobs = []  # List of all scheduled jobs
+        self.thread = None  # Thread for running the scheduler
+        self.lock = Lock()  # Lock for thread safety
+        self.paused_scripts = set()  # Store paused script file names
+        self.run_script_func = run_script_func  # Reference to the run_script method
 
     def add_job_with_frequency(self, time, job_func, file_name, frequency, weekday=None):
+        """
+        Add a job to the scheduler with the specified frequency and time.
+
+        :param time: Time in HH:MM format
+        :param job_func: The function to execute
+        :param file_name: The name of the script file
+        :param frequency: The frequency (e.g., "daily" or "weekly")
+        :param weekday: The weekday (if weekly frequency)
+        """
         with self.lock:
             # Check if the job already exists
             for job in self.jobs:
-                if job["file_name"] == file_name and job["time"] == time and job["frequency"] == frequency and job[
-                    "weekday"] == weekday:
+                if (
+                    job["file_name"] == file_name
+                    and job["time"] == time
+                    and job["frequency"] == frequency
+                    and job.get("weekday") == weekday
+                ):
                     logging.warning(f"Job already exists: {file_name} at {time} ({frequency} {weekday or ''})")
                     return
+
+            # Schedule the job
             if frequency == "daily":
                 schedule.every().day.at(time).do(job_func).tag(file_name)
             elif frequency == "weekly" and weekday:
@@ -103,6 +123,8 @@ class SchedulerCore:
                 }
                 if weekday in weekday_mapping:
                     weekday_mapping[weekday].at(time).do(job_func).tag(file_name)
+
+            # Store the job details
             self.jobs.append({"file_name": file_name, "time": time, "frequency": frequency, "weekday": weekday})
 
     def start_scheduler(self):
@@ -117,29 +139,96 @@ class SchedulerCore:
         logging.info("Scheduler thread started.")
         while True:
             if self.is_running:
-                # Run pending jobs without logging every iteration
-                schedule.run_pending()
+                with self.lock:
+                    schedule.run_pending()  # Run scheduled jobs
             time.sleep(1)  # Sleep for 1 second between checks
 
     def pause_scheduler(self):
+        """Pause the entire scheduler."""
         self.is_running = False
 
     def resume_scheduler(self):
+        """Resume the entire scheduler."""
         self.is_running = True
 
     def clear_jobs(self):
+        """Clear all scheduled jobs."""
         schedule.clear()
         self.jobs.clear()
 
+    def pause_script(self, file_name):
+        """
+        Pause a specific script by its file name.
+
+        :param file_name: The name of the script file to pause
+        """
+        with self.lock:
+            self.paused_scripts.add(file_name)
+            schedule.clear(file_name)  # Remove the script's job from the schedule
+
+    def resume_script(self, file_name):
+        with self.lock:
+            # Exit early if the script is not in paused_scripts
+            if file_name not in self.paused_scripts:
+                logging.debug(f"Script '{file_name}' is not paused. Skipping resume.")
+                return
+
+            # Remove from paused list
+            self.paused_scripts.remove(file_name)
+
+            # Clear existing scheduled jobs for this file_name
+            schedule.clear(file_name)
+
+            # Re-schedule the job
+            for job in self.jobs:
+                if job["file_name"] == file_name:
+                    job_func = partial(self.run_script_func, file_name=file_name)
+                    if job["frequency"] == "daily":
+                        schedule.every().day.at(job["time"]).do(job_func).tag(file_name)
+                    elif job["frequency"] == "weekly" and job.get("weekday"):
+                        weekday_mapping = {
+                            "monday": schedule.every().monday,
+                            "tuesday": schedule.every().tuesday,
+                            "wednesday": schedule.every().wednesday,
+                            "thursday": schedule.every().thursday,
+                            "friday": schedule.every().friday,
+                            "saturday": schedule.every().saturday,
+                            "sunday": schedule.every().sunday,
+                        }
+                        weekday_mapping[job["weekday"]].at(job["time"]).do(job_func).tag(file_name)
+
+                    logging.info(f"Resumed script: {file_name}")
+                    return  "resume call"# Exit after rescheduling the job
+
+    def _re_add_job(self, file_name):
+        """Re-add a paused job to the scheduler."""
+        for job in self.jobs:
+            if job["file_name"] == file_name:
+                job_func = partial(self.run_script_func, file_name=file_name)
+                self.add_job_with_frequency(
+                    job["time"],
+                    job_func,
+                    job["file_name"],
+                    job["frequency"],
+                    job.get("weekday"),
+                )
+                logging.info(f"Resumed script: {file_name}")
+
+    def is_script_paused(self, file_name):
+        """
+        Check if a specific script is paused.
+
+        :param file_name: The name of the script file
+        :return: True if the script is paused, False otherwise
+        """
+        return file_name in self.paused_scripts
 
 class SchedulerApp:
-    """Main application class that combines GUI, script manager, and scheduler core."""
-
     def __init__(self, root):
         self.root = root
         self.style = Style(theme="flatly")
         self.script_manager = ScriptManager()
-        self.scheduler = SchedulerCore()
+        self.scheduler = SchedulerCore(self.run_script)  # Pass run_script to SchedulerCore
         self.current_scheduler_status = SchedulerStatus.NOT_RUNNING  # Track the current status
         self.init_logging()
         self.build_gui()
@@ -174,9 +263,10 @@ class SchedulerApp:
     def init_logging(self):
         logging.basicConfig(
             filename=LOG_FILE,
-            level=logging.INFO,
-            format="%(asctime)s - %(levelname)s - %(message)s",
+            level=logging.INFO,  # Set to DEBUG to capture all log levels
+            format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         )
+        logging.debug("Logging initialized with DEBUG level.")
 
     def build_gui(self):
         # Apply theme
@@ -243,6 +333,7 @@ class SchedulerApp:
     def _build_buttons_section(self):
         buttons_frame = ttk.Frame(self.root, padding=(10, 5))
         buttons_frame.pack(fill=tk.X)
+
         ttk.Button(buttons_frame, text="Add Script", style="primary.TButton", command=self.add_script).pack(
             side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="Remove Selected", style="primary.TButton", command=self.remove_script).pack(
@@ -251,6 +342,10 @@ class SchedulerApp:
             side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="Run Selected Now", style="primary.TButton", command=self.run_now).pack(
             side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Pause Script", style="primary.TButton",
+                   command=self.pause_selected_script).pack(side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Resume Script", style="primary.TButton",
+                   command=self.resume_selected_script).pack(side=tk.LEFT, padx=5)
         ttk.Button(buttons_frame, text="View Logs", style="primary.TButton", command=self.open_log_viewer).pack(
             side=tk.LEFT, padx=5)
 
@@ -267,7 +362,7 @@ class SchedulerApp:
         self.pause_button.pack(side=tk.LEFT, padx=5)
 
         self.resume_button = ttk.Button(controls_frame, text="Resume Scheduler", style="primary.TButton",
-                                        command=self.resume_scheduler, state=tk.DISABLED)
+                                        command=self.resume_selected_script, state=tk.DISABLED)
         self.resume_button.pack(side=tk.LEFT, padx=5)
 
         self.clear_jobs_button = ttk.Button(controls_frame, text="Clear Scheduled Jobs",
@@ -327,6 +422,40 @@ class SchedulerApp:
         self.output_panel = scrolledtext.ScrolledText(output_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
         self.output_panel.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.output_panel.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    def pause_selected_script(self):
+        """Pause the selected script."""
+        selected = self.script_list_tree.selection()
+        if selected:
+            for item in selected:
+                file_name = self.script_list_tree.item(item, "values")[0]
+                self.scheduler.pause_script(file_name)
+                logging.info(f"Paused script: {file_name}")
+                messagebox.showinfo("Pause Script", f"Script '{file_name}' has been paused.")
+            self.refresh_gui()
+        else:
+            messagebox.showwarning("Warning", "No script selected!")
+
+    def resume_selected_script(self):
+        """Resume the selected script."""
+        selected = self.script_list_tree.selection()
+
+        if selected:
+            for item in selected:
+                file_name = self.script_list_tree.item(item, "values")[0]
+
+                # Check if the script is already active
+                if not self.scheduler.is_script_paused(file_name):
+                    messagebox.showinfo("Resume Script", f"Script '{file_name}' is already active.")
+                    return
+
+                # Resume the script
+                self.scheduler.resume_script(file_name)  # Call resume_script only once
+                messagebox.showinfo("Resume Script", f"Script '{file_name}' has been resumed.")
+                self.refresh_gui()  # Update GUI
+                return  # Exit after processing one script
+        else:
+            messagebox.showwarning("Warning", "No script selected!")
 
     def toggle_dark_mode(self):
         """Toggle between light and dark themes."""
@@ -429,17 +558,28 @@ class SchedulerApp:
             row_id = self.script_list_tree.insert(
                 "", tk.END, values=(file_name, time_display, frequency_display, weekday_display, script["file_path"])
             )
-            if script["time"]:
+            if self.scheduler.is_script_paused(file_name):
+                self.script_list_tree.item(row_id, tags=("paused",))
+            elif script["time"]:
                 self.script_list_tree.item(row_id, tags=("scheduled",))
         self.script_list_tree.tag_configure("scheduled", background="lightgreen")
+        self.script_list_tree.tag_configure("paused", background="lightcoral")
 
     def update_scheduled_jobs_tree(self):
-        """Refresh the scheduled jobs list."""
-        self.scheduled_jobs_tree.delete(*self.scheduled_jobs_tree.get_children())
+        """Refresh the scheduled jobs list and exclude paused jobs."""
+        self.scheduled_jobs_tree.delete(*self.scheduled_jobs_tree.get_children())  # Clear current entries
         for job in sorted(self.scheduler.jobs, key=lambda j: j["time"] or "99:99"):
+            file_name = job["file_name"]
+
+            # Skip paused jobs
+            if self.scheduler.is_script_paused(file_name):
+                continue
+
             weekday_display = job["weekday"].capitalize() if job["weekday"] else ""
-            self.scheduled_jobs_tree.insert("", tk.END, values=(
-                job["file_name"], job["time"], f"{job['frequency']} {weekday_display}"))
+            self.scheduled_jobs_tree.insert(
+                "", tk.END,
+                values=(file_name, job["time"], f"{job['frequency']} {weekday_display}")
+            )
 
     def start_scheduler(self):
         """Start the scheduler."""
