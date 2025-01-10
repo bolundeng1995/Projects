@@ -1,4 +1,5 @@
 import tkinter as tk
+import ttkbootstrap
 from tkinter import filedialog, messagebox, simpledialog, scrolledtext
 from tkinter import ttk
 from datetime import datetime
@@ -77,6 +78,7 @@ class SchedulerCore:
         self.jobs = []
         self.thread = None
         self.lock = Lock()
+        self.paused_jobs = {}  # Track paused jobs by their file name
 
     def add_job_with_frequency(self, time, job_func, file_name, frequency, weekday=None):
         with self.lock:
@@ -129,6 +131,7 @@ class SchedulerApp:
 
     def __init__(self, root):
         self.root = root
+        self.style = Style(theme="flatly")
         self.script_manager = ScriptManager()
         self.scheduler = SchedulerCore()
         self.init_logging()
@@ -168,84 +171,163 @@ class SchedulerApp:
         )
 
     def build_gui(self):
+        # Apply theme
+        style = Style(theme="flatly")  # Change theme if needed
+        style.configure("success.TLabel", foreground="green", font=("Helvetica", 12, "bold"))
+        style.configure("warning.TLabel", foreground="orange", font=("Helvetica", 12, "bold"))
+        style.configure("danger.TLabel", foreground="red", font=("Helvetica", 12, "bold"))
+        style.configure("TLabel", font=("Helvetica", 12))
+        style.configure("TButton", padding=10)
+
         self.root.title("Python Script Scheduler")
         self.root.geometry("1000x700")
 
-        # Search Bar
-        search_frame = tk.Frame(self.root)
-        search_frame.pack(pady=5)
-        tk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=5)
-        search_entry = tk.Entry(search_frame)
-        search_entry.pack(side=tk.LEFT, padx=5)
-        tk.Button(search_frame, text="Search", command=lambda: self.search_scripts(search_entry.get())).pack(
-            side=tk.LEFT)
-        tk.Button(search_frame, text="Reset", command=self.update_script_tree).pack(side=tk.LEFT, padx=5)
+        # Build GUI sections
+        self._build_search_section()
+        self._build_script_section()
+        self._build_buttons_section()
+        self._build_scheduler_controls()
+        self._build_jobs_section()
+        self._build_output_panel()
 
-        # Script List
+    def _build_search_section(self):
+        search_frame = ttk.Frame(self.root, padding=(10, 5))
+        search_frame.pack(fill=tk.X)
+        ttk.Label(search_frame, text="Search:", font=("Helvetica", 10)).pack(side=tk.LEFT, padx=5)
+        search_entry = ttk.Entry(search_frame, width=40)
+        search_entry.pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_frame, text="Search", style="primary.TButton",
+                   command=lambda: self.search_scripts(search_entry.get())).pack(side=tk.LEFT, padx=5)
+        ttk.Button(search_frame, text="Reset", style="primary.TButton", command=self.update_script_tree).pack(
+            side=tk.LEFT, padx=5)
+
+    def _build_script_section(self):
+        script_frame = ttk.LabelFrame(self.root, text="Scripts", padding=(10, 5))
+        script_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        script_list_frame = ttk.Frame(script_frame)
+        script_list_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Treeview with Scrollbar
+        script_scrollbar = ttk.Scrollbar(script_list_frame, orient=tk.VERTICAL)
         self.script_list_tree = ttk.Treeview(
-            self.root,
+            script_list_frame,
             columns=("File Name", "Time", "Frequency", "Weekday", "File Location"),
             show="headings",
-            height=10
+            height=10,
+            yscrollcommand=script_scrollbar.set
         )
+        script_scrollbar.config(command=self.script_list_tree.yview)
+        script_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.script_list_tree.pack(fill=tk.BOTH, expand=True)
+
+        # Treeview Column Configuration
         self.script_list_tree.heading("File Name", text="File Name")
         self.script_list_tree.heading("Time", text="Time")
         self.script_list_tree.heading("Frequency", text="Frequency")
         self.script_list_tree.heading("Weekday", text="Weekday")
         self.script_list_tree.heading("File Location", text="File Location")
-        self.script_list_tree.column("File Name", width=150)
-        self.script_list_tree.column("Time", width=100)
-        self.script_list_tree.column("Frequency", width=100)
-        self.script_list_tree.column("Weekday", width=100)
-        self.script_list_tree.column("File Location", width=500)
-        self.script_list_tree.pack(pady=10)
+        self.script_list_tree.column("File Name", width=150, stretch=tk.YES)
+        self.script_list_tree.column("Time", width=100, stretch=tk.YES)
+        self.script_list_tree.column("Frequency", width=100, stretch=tk.YES)
+        self.script_list_tree.column("Weekday", width=100, stretch=tk.YES)
+        self.script_list_tree.column("File Location", width=500, stretch=tk.YES)
 
-        # Buttons
-        buttons_frame = tk.Frame(self.root)
-        buttons_frame.pack(pady=10)
-        tk.Button(buttons_frame, text="Add Script", command=self.add_script).grid(row=0, column=0, padx=5)
-        tk.Button(buttons_frame, text="Remove Selected", command=self.remove_script).grid(row=0, column=1, padx=5)
-        tk.Button(buttons_frame, text="Schedule Selected", command=self.schedule_script).grid(row=0, column=2, padx=5)
-        tk.Button(buttons_frame, text="Run Selected Now", command=self.run_now).grid(row=0, column=3, padx=5)
-        tk.Button(buttons_frame, text="View Logs", command=self.open_log_viewer).grid(row=0, column=4, padx=5)
+    def _build_buttons_section(self):
+        buttons_frame = ttk.Frame(self.root, padding=(10, 5))
+        buttons_frame.pack(fill=tk.X)
+        ttk.Button(buttons_frame, text="Add Script", style="primary.TButton", command=self.add_script).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Remove Selected", style="primary.TButton", command=self.remove_script).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Schedule Selected", style="primary.TButton", command=self.schedule_script).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="Run Selected Now", style="primary.TButton", command=self.run_now).pack(
+            side=tk.LEFT, padx=5)
+        ttk.Button(buttons_frame, text="View Logs", style="primary.TButton", command=self.open_log_viewer).pack(
+            side=tk.LEFT, padx=5)
 
-        # Scheduler Controls
-        self.start_button = tk.Button(buttons_frame, text="Start Scheduler", command=self.start_scheduler)
-        self.start_button.grid(row=1, column=0, padx=5)
+    def _build_scheduler_controls(self):
+        controls_frame = ttk.LabelFrame(self.root, text="Scheduler Controls", padding=(10, 5))
+        controls_frame.pack(fill=tk.X, padx=10, pady=5)
 
-        self.pause_button = tk.Button(buttons_frame, text="Pause Scheduler", command=self.pause_scheduler,
-                                      state=tk.DISABLED)
-        self.pause_button.grid(row=1, column=1, padx=5)
+        self.start_button = ttk.Button(controls_frame, text="Start Scheduler", style="primary.TButton",
+                                       command=self.start_scheduler)
+        self.start_button.pack(side=tk.LEFT, padx=5)
 
-        self.resume_button = tk.Button(buttons_frame, text="Resume Scheduler", command=self.resume_scheduler,
+        self.pause_button = ttk.Button(controls_frame, text="Pause Scheduler", style="primary.TButton",
+                                       command=self.pause_scheduler,
                                        state=tk.DISABLED)
-        self.resume_button.grid(row=1, column=2, padx=5)
+        self.pause_button.pack(side=tk.LEFT, padx=5)
 
-        self.clear_jobs_button = tk.Button(buttons_frame, text="Clear Scheduled Jobs",
-                                           command=self.clear_scheduled_jobs)
-        self.clear_jobs_button.grid(row=1, column=3, padx=5)
+        self.resume_button = ttk.Button(controls_frame, text="Resume Scheduler", style="primary.TButton",
+                                        command=self.resume_scheduler,
+                                        state=tk.DISABLED)
+        self.resume_button.pack(side=tk.LEFT, padx=5)
 
-        # Scheduler Status
-        self.scheduler_status = tk.Label(self.root, text="Scheduler Status: Not Running", fg="red",
-                                         font=("Arial", 12, "bold"))
+        self.clear_jobs_button = ttk.Button(controls_frame, text="Clear Scheduled Jobs",
+                                            style="primary.TButton", command=self.clear_scheduled_jobs)
+        self.clear_jobs_button.pack(side=tk.LEFT, padx=5)
+
+        # Dark Mode Toggle
+        self.dark_mode = tk.BooleanVar(value=False)  # Track dark mode state
+        self.dark_mode_toggle = ttk.Checkbutton(
+            controls_frame,
+            text="Dark Mode",
+            variable=self.dark_mode,
+            style="primary.TCheckbutton",
+            command=self.toggle_dark_mode
+        )
+        self.dark_mode_toggle.pack(side=tk.LEFT, padx=5)
+
+        self.scheduler_status = ttk.Label(self.root, text="Scheduler Status: Not Running", foreground="red",
+                                          font=("Helvetica", 12, "bold"))
         self.scheduler_status.pack(pady=5)
 
-        # Scheduled Jobs
-        tk.Label(self.root, text="Scheduled Jobs:").pack(pady=5)
-        self.scheduled_jobs_tree = ttk.Treeview(self.root, columns=("File Name", "Time", "File Location"),
-                                                show="headings", height=5)
+    def _build_jobs_section(self):
+        jobs_frame = ttk.LabelFrame(self.root, text="Scheduled Jobs", padding=(10, 5))
+        jobs_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        jobs_list_frame = ttk.Frame(jobs_frame)
+        jobs_list_frame.pack(fill=tk.BOTH, expand=True)
+
+        # Treeview with Scrollbar for Scheduled Jobs
+        jobs_scrollbar = ttk.Scrollbar(jobs_list_frame, orient=tk.VERTICAL)
+        self.scheduled_jobs_tree = ttk.Treeview(
+            jobs_list_frame,
+            columns=("File Name", "Time", "File Location"),
+            show="headings",
+            height=5,
+            yscrollcommand=jobs_scrollbar.set
+        )
+        jobs_scrollbar.config(command=self.scheduled_jobs_tree.yview)
+        jobs_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        self.scheduled_jobs_tree.pack(fill=tk.BOTH, expand=True)
+
+        # Scheduled Jobs Treeview Column Configuration
         self.scheduled_jobs_tree.heading("File Name", text="File Name")
         self.scheduled_jobs_tree.heading("Time", text="Time")
         self.scheduled_jobs_tree.heading("File Location", text="File Location")
         self.scheduled_jobs_tree.column("File Name", width=200)
         self.scheduled_jobs_tree.column("Time", width=100)
         self.scheduled_jobs_tree.column("File Location", width=600)
-        self.scheduled_jobs_tree.pack(pady=10)
 
-        # Add Output Panel
-        tk.Label(self.root, text="Output Panel:").pack(pady=5)
-        self.output_panel = scrolledtext.ScrolledText(self.root, wrap=tk.WORD, height=10, state=tk.DISABLED)
-        self.output_panel.pack(pady=10)
+    def _build_output_panel(self):
+        output_frame = ttk.LabelFrame(self.root, text="Output Panel", padding=(10, 5))
+        output_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        self.output_panel = scrolledtext.ScrolledText(output_frame, wrap=tk.WORD, height=10, state=tk.DISABLED)
+        self.output_panel.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        self.output_panel.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+
+    def toggle_dark_mode(self):
+        """Toggle between light and dark themes."""
+        try:
+            if self.dark_mode.get():
+                self.style.theme_use("darkly")  # Switch to a dark theme
+                logging.info("Switched to Dark Mode")
+            else:
+                self.style.theme_use("flatly")  # Switch to a light theme
+                logging.info("Switched to Light Mode")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to switch themes: {str(e)}")
 
     def search_scripts(self, query):
         """Filter scripts by file name or path."""
@@ -268,17 +350,17 @@ class SchedulerApp:
         log_window.title("Logs Viewer")
         log_window.geometry("800x600")
 
-        tk.Label(log_window, text="Execution Logs", font=("Arial", 14)).pack(pady=10)
+        ttk.Label(log_window, text="Execution Logs", font=("Arial", 14)).pack(pady=10)
 
         # ScrolledText widget to display logs
         log_text = scrolledtext.ScrolledText(log_window, wrap=tk.WORD, width=100, height=30, state=tk.DISABLED)
         log_text.pack(pady=10, padx=10)
 
         # Refresh logs button
-        tk.Button(log_window, text="Refresh Logs", command=lambda: self.load_logs(log_text)).pack(side=tk.LEFT, padx=10)
+        ttk.Button(log_window, text="Refresh Logs", style="primary.TButton", command=lambda: self.load_logs(log_text)).pack(side=tk.LEFT, padx=10)
 
         # Clear logs button
-        tk.Button(log_window, text="Clear Logs", command=self.clear_logs).pack(side=tk.LEFT, padx=10)
+        ttk.Button(log_window, text="Clear Logs", style="primary.TButton", command=self.clear_logs).pack(side=tk.LEFT, padx=10)
 
         # Load logs initially
         self.load_logs(log_text)
@@ -307,7 +389,12 @@ class SchedulerApp:
 
     def update_scheduler_status(self, status, color="red"):
         """Updates the scheduler status label and button states."""
-        self.scheduler_status.config(text=f"Scheduler Status: {status}", fg=color)
+        status_style = {
+            "Running": "success",
+            "Paused": "warning",
+            "Not Running": "danger"
+        }
+        self.scheduler_status.configure(style=f"{status_style[status]}.TLabel")
         self.start_button.config(state=tk.DISABLED if status == SchedulerStatus.RUNNING else tk.NORMAL)
         self.pause_button.config(state=tk.NORMAL if status == SchedulerStatus.RUNNING else tk.DISABLED)
         self.resume_button.config(state=tk.NORMAL if status == SchedulerStatus.PAUSED else tk.DISABLED)

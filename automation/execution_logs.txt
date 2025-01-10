@@ -20,3 +20,4 @@
 2025-01-09 16:51:24,297 - INFO - Scheduler started.
 2025-01-09 16:51:25,145 - INFO - Scheduler paused.
 2025-01-09 16:51:31,671 - INFO - Scheduler resumed.
+2025-01-09 19:05:12,056 - ERROR - Invalid file selected: ()

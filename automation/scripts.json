@@ -1,13 +1,1 @@
-[{"file_path": "/home/ubuntu/Documents/Quant/Bolun/Projects/automation/test.py",
-  "time": "16:41",
-  "frequency": "daily",
-  "weekday": null
-  },
-  {"file_path": "/home/ubuntu/Documents/Quant/Bolun/Projects/automation/test1.py",
-  "time": "16:42",
-  "frequency": "weekly",
-    "weekday": "thursday"
-  }
-
-
-]
+[{"file_path": "/home/ubuntu/Documents/Quant/Bolun/Projects/automation/test.py", "time": "16:41", "frequency": "daily", "weekday": null}]
