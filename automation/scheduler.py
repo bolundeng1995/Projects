@@ -389,7 +389,12 @@ class SchedulerApp:
         messagebox.showinfo("Logs", "Log file has been cleared.")
 
     def load_logs(self, log_text_widget):
-        """Load logs from the log file and display them in the ScrolledText widget."""
+        """Load logs asynchronously."""
+        thread = threading.Thread(target=self._load_logs, args=(log_text_widget,), daemon=True)
+        thread.start()
+
+    def _load_logs(self, log_text_widget):
+        """Actual implementation for loading logs."""
         try:
             with open(LOG_FILE, "r") as log_file:
                 logs = log_file.read()
@@ -558,7 +563,12 @@ class SchedulerApp:
             messagebox.showwarning("Warning", "No script selected!")
 
     def run_script(self, file_name):
-        """Run the specified script and display its output."""
+        """Run the specified script asynchronously and display its output."""
+        thread = threading.Thread(target=self._run_script, args=(file_name,), daemon=True)
+        thread.start()
+
+    def _run_script(self, file_name):
+        """Actual implementation for running a script."""
         script = next((s for s in self.script_manager.scripts if os.path.basename(s["file_path"]) == file_name), None)
         if script:
             if not os.path.exists(script["file_path"]):

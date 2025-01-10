@@ -3,3 +3,11 @@
 2025-01-09 21:19:20,874 - INFO - Scheduler started.
 2025-01-09 21:20:00,934 - INFO - Executed script: test.py
 2025-01-09 21:21:00,025 - INFO - Executed script: test1.py
+2025-01-09 21:24:43,038 - INFO - Scheduler thread started.
+2025-01-09 21:24:43,038 - INFO - Updating scheduler status to: Running
+2025-01-09 21:24:43,038 - INFO - Scheduler started.
+2025-01-09 21:25:00,063 - INFO - Executed script: test.py
+2025-01-09 21:27:47,272 - INFO - Scheduler thread started.
+2025-01-09 21:27:47,272 - INFO - Updating scheduler status to: Running
+2025-01-09 21:27:47,273 - INFO - Scheduler started.
+2025-01-09 21:28:00,308 - INFO - Executed script: test.py
