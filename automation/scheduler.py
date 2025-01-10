@@ -73,8 +73,9 @@ class ScriptManager:
 
 
 class SchedulerCore:
+
     def __init__(self):
-        self.is_running = True
+        self.is_running = False  # Default state is Not Running
         self.jobs = []
         self.thread = None
         self.lock = Lock()
@@ -105,15 +106,20 @@ class SchedulerCore:
             self.jobs.append({"file_name": file_name, "time": time, "frequency": frequency, "weekday": weekday})
 
     def start_scheduler(self):
+        """Start the scheduler."""
+        self.is_running = True
         if not self.thread or not self.thread.is_alive():
             self.thread = threading.Thread(target=self.run_scheduler, daemon=True)
             self.thread.start()
 
     def run_scheduler(self):
+        """Main loop for running the scheduler."""
+        logging.info("Scheduler thread started.")
         while True:
             if self.is_running:
+                # Run pending jobs without logging every iteration
                 schedule.run_pending()
-            time.sleep(1)
+            time.sleep(1)  # Sleep for 1 second between checks
 
     def pause_scheduler(self):
         self.is_running = False
@@ -134,10 +140,12 @@ class SchedulerApp:
         self.style = Style(theme="flatly")
         self.script_manager = ScriptManager()
         self.scheduler = SchedulerCore()
+        self.current_scheduler_status = SchedulerStatus.NOT_RUNNING  # Track the current status
         self.init_logging()
         self.build_gui()
         self.schedule_saved_scripts()  # Schedule saved scripts at startup
         self.auto_refresh_gui()
+        self.update_scheduler_status(SchedulerStatus.NOT_RUNNING, color="red")  # Default to Not Running
 
     def refresh_gui(self):
         """Refresh the GUI components."""
@@ -255,13 +263,11 @@ class SchedulerApp:
         self.start_button.pack(side=tk.LEFT, padx=5)
 
         self.pause_button = ttk.Button(controls_frame, text="Pause Scheduler", style="primary.TButton",
-                                       command=self.pause_scheduler,
-                                       state=tk.DISABLED)
+                                       command=self.pause_scheduler, state=tk.DISABLED)
         self.pause_button.pack(side=tk.LEFT, padx=5)
 
         self.resume_button = ttk.Button(controls_frame, text="Resume Scheduler", style="primary.TButton",
-                                        command=self.resume_scheduler,
-                                        state=tk.DISABLED)
+                                        command=self.resume_scheduler, state=tk.DISABLED)
         self.resume_button.pack(side=tk.LEFT, padx=5)
 
         self.clear_jobs_button = ttk.Button(controls_frame, text="Clear Scheduled Jobs",
@@ -279,8 +285,13 @@ class SchedulerApp:
         )
         self.dark_mode_toggle.pack(side=tk.LEFT, padx=5)
 
-        self.scheduler_status = ttk.Label(self.root, text="Scheduler Status: Not Running", foreground="red",
-                                          font=("Helvetica", 12, "bold"))
+        # Set default status to Not Running
+        self.scheduler_status = ttk.Label(
+            self.root,
+            text="Scheduler Status: Not Running",
+            foreground="red",
+            font=("Helvetica", 12, "bold")
+        )
         self.scheduler_status.pack(pady=5)
 
     def _build_jobs_section(self):
@@ -342,6 +353,11 @@ class SchedulerApp:
     def auto_refresh_gui(self):
         """Automatically refresh the GUI."""
         self.refresh_gui()
+        # Determine the current scheduler state and update the status only if it changes
+        if self.scheduler.is_running:
+            self.update_scheduler_status(SchedulerStatus.RUNNING, color="green")
+        else:
+            self.update_scheduler_status(SchedulerStatus.NOT_RUNNING, color="red")
         self.root.after(5000, self.auto_refresh_gui)
 
     def open_log_viewer(self):
@@ -388,16 +404,14 @@ class SchedulerApp:
             log_text_widget.config(state=tk.DISABLED)
 
     def update_scheduler_status(self, status, color="red"):
-        """Updates the scheduler status label and button states."""
-        status_style = {
-            "Running": "success",
-            "Paused": "warning",
-            "Not Running": "danger"
-        }
-        self.scheduler_status.configure(style=f"{status_style[status]}.TLabel")
-        self.start_button.config(state=tk.DISABLED if status == SchedulerStatus.RUNNING else tk.NORMAL)
-        self.pause_button.config(state=tk.NORMAL if status == SchedulerStatus.RUNNING else tk.DISABLED)
-        self.resume_button.config(state=tk.NORMAL if status == SchedulerStatus.PAUSED else tk.DISABLED)
+        """Update the scheduler status label and button states."""
+        if status != self.current_scheduler_status:  # Only update if the status has changed
+            self.current_scheduler_status = status  # Update the tracked status
+            logging.info(f"Updating scheduler status to: {status}")
+            self.scheduler_status.config(text=f"Scheduler Status: {status}", foreground=color)
+            self.start_button.config(state=tk.DISABLED if status == SchedulerStatus.RUNNING else tk.NORMAL)
+            self.pause_button.config(state=tk.NORMAL if status == SchedulerStatus.RUNNING else tk.DISABLED)
+            self.resume_button.config(state=tk.NORMAL if status == SchedulerStatus.PAUSED else tk.DISABLED)
 
     def update_script_tree(self):
         """Refresh the script list and highlight scheduled scripts."""
@@ -425,10 +439,11 @@ class SchedulerApp:
     def start_scheduler(self):
         """Start the scheduler."""
         self.scheduler.start_scheduler()
-        self.update_scheduler_status("Running", color="green")
-        self.start_button.config(state=tk.DISABLED)
-        self.pause_button.config(state=tk.NORMAL)
-        logging.info("Scheduler started.")
+        if self.scheduler.is_running:
+            self.update_scheduler_status(SchedulerStatus.RUNNING, color="green")
+            logging.info("Scheduler started.")
+        else:
+            logging.error("Failed to start scheduler.")
 
     def pause_scheduler(self):
         """Pause the scheduler."""
