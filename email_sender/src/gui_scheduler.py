@@ -24,6 +24,7 @@ import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 import subprocess
 from task_config import TaskManager
+import sys
 
 @dataclass
 class TaskInfo:
@@ -344,7 +345,8 @@ class SchedulerGUI:
         """
         try:
             self.logger.info(f"Running script: {script_path}")
-            result = subprocess.run(['python', script_path], check=True, 
+            python_cmd = 'python' if sys.platform == 'win32' else 'python3'
+            result = subprocess.run([python_cmd, script_path], check=True, 
                                  capture_output=True, text=True)
             
             # Update last run time and status

@@ -2,5 +2,5 @@ pandas
 numpy
 pywin32
 APScheduler
-tkinter
-openpyxl 
+openpyxl
+pandas_market_calendars 
