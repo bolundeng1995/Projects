@@ -2,7 +2,30 @@ from typing import Dict, Any, Callable
 import pandas as pd
 from pathlib import Path
 
+"""
+Data processing module for handling various data formats and transformations.
+
+This module provides:
+- Flexible data loading from different sources
+- Customizable data processing functions
+- Data transformation pipeline management
+"""
+
 class DataProcessor:
+    """
+    Handles data loading and processing operations.
+    
+    Features:
+    - Multiple data source management
+    - Custom processor registration
+    - Flexible data transformations
+    
+    Usage:
+        processor = DataProcessor()
+        processor.register_processor('my_analysis', my_function)
+        processor.load_data('source1', 'data.csv')
+        results = processor.process_data('source1', 'my_analysis')
+    """
     def __init__(self) -> None:
         self.data_sources: dict[str, pd.DataFrame] = {}
         self.processors: dict[str, Callable] = {}

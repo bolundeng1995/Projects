@@ -1,8 +1,30 @@
+"""
+Example task script template.
+
+This script demonstrates:
+- Basic data processing setup
+- Result file generation
+- Error handling
+
+Usage:
+    1. Copy this template for new tasks
+    2. Modify the data processing logic
+    3. Add to the scheduler using the GUI
+"""
+
 from data_processor import DataProcessor
 from email_sender import EmailManager
 from pathlib import Path
 
 def main():
+    """
+    Main task execution function.
+    
+    Demonstrates:
+    - Data processing setup
+    - Result generation
+    - Error handling
+    """
     # Initialize components
     processor = DataProcessor()
     email_mgr = EmailManager()

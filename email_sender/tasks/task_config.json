@@ -1,9 +1,12 @@
 {
     "Testing": {
         "script_path": "/Users/bolundeng/PycharmProjects/Projects/email_sender/tasks/scripts/daily_market_report.py",
-        "schedule_time": "23:35",
+        "schedule_time": "22:32",
+        "frequency": "daily",
+        "days": "mon-fri",
         "is_active": true,
-        "last_run": "",
-        "next_run": "2025-03-04 23:35:00"
+        "last_run": "2025-03-05 22:35:04",
+        "next_run": "2025-03-06 22:32:00",
+        "last_status": "Success"
     }
 }

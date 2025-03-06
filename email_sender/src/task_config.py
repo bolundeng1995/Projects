@@ -3,7 +3,33 @@ from typing import Dict, Any
 import json
 import logging
 
+"""
+Task configuration management module.
+
+This module handles:
+- Storing task configurations
+- Managing task scripts
+- Organizing output and log files
+
+Directory Structure:
+    tasks/
+    ├── scripts/    # Task script files
+    ├── output/     # Task output files
+    ├── logs/       # Task execution logs
+    └── task_config.json  # Task configurations
+"""
+
 class TaskManager:
+    """
+    Manages task configurations and associated files.
+    
+    Handles:
+    - Task script storage
+    - Configuration persistence
+    - Directory structure management
+    - Task removal and cleanup
+    """
+    
     def __init__(self):
         self.tasks_dir = Path(__file__).parent.parent / 'tasks'
         self.config_file = self.tasks_dir / 'task_config.json'
@@ -27,7 +53,16 @@ class TaskManager:
             self.save_config({})
         
     def save_task_script(self, script_name: str, script_content: str) -> Path:
-        """Save a new task script to the scripts directory"""
+        """
+        Save a new task script to the scripts directory.
+        
+        Args:
+            script_name (str): Name for the script file
+            script_content (str): Python script content
+            
+        Returns:
+            Path: Path to the saved script file
+        """
         script_path = self.tasks_dir / 'scripts' / f"{script_name}.py"
         script_path.write_text(script_content)
         return script_path
@@ -38,7 +73,20 @@ class TaskManager:
         return config.get(task_name, {})
         
     def save_task_info(self, task_name: str, info: dict[str, Any]) -> None:
-        """Save or update task information"""
+        """
+        Save or update task configuration.
+        
+        Args:
+            task_name (str): Unique task identifier
+            info (dict): Task configuration including:
+                - script_path: Path to the script
+                - schedule_time: Time to run (HH:MM)
+                - frequency: daily/weekly/monthly
+                - days: Days to run
+                - is_active: Active status
+                - last_run: Last execution time
+                - next_run: Next scheduled time
+        """
         config = self.load_config()
         config[task_name] = info
         self.save_config(config)

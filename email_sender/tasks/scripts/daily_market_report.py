@@ -56,10 +56,11 @@ def main():
         summary_path = output_dir / f'summary_{timestamp}.txt'
         summary_path.write_text(summary)
         
-        print(f"Reports saved to:\n{excel_path}\n{summary_path}")
+        print(f"Report generated successfully at {datetime.now()}")
+        print(f"Files saved to: {output_dir}")
         
     except Exception as e:
-        print(f"Error in daily market report: {str(e)}")
+        print(f"Error: {str(e)}")
 
 if __name__ == "__main__":
     main() 
