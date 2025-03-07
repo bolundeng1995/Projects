@@ -1,0 +1,20 @@
+{
+  "corporate_actions_report": {
+    "email_recipients": ["your.email@company.com", "team.email@company.com"],
+    "thresholds": {
+      "high_impact_percentile": 0.75,
+      "low_impact_percentile": 0.25,
+      "urgent_days": 3,
+      "warning_days": 5
+    },
+    "visualization": {
+      "chart_colors": ["#3498db", "#2ecc71", "#e74c3c", "#f39c12", "#9b59b6", "#1abc9c", "#34495e", "#e67e22"],
+      "high_impact_color": "#e74c3c",
+      "medium_impact_color": "#f39c12",
+      "low_impact_color": "#2ecc71",
+      "undefined_impact_color": "#7f8c8d"
+    },
+    "stock_profile_base_url": "https://finance.yahoo.com/quote/",
+    "input_file": "corporate_actions.xlsx"
+  }
+} 

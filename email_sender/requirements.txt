@@ -3,4 +3,6 @@ numpy
 pywin32
 APScheduler
 openpyxl
-pandas_market_calendars 
+pandas_market_calendars
+matplotlib
+seaborn 

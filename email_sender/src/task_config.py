@@ -12,11 +12,12 @@ This module handles:
 - Organizing output and log files
 
 Directory Structure:
-    tasks/
-    ├── scripts/    # Task script files
-    ├── output/     # Task output files
-    ├── logs/       # Task execution logs
+    config/
     └── task_config.json  # Task configurations
+    tasks/
+    ├── scripts/          # Task script files
+    ├── output/           # Task output files
+    └── logs/             # Task execution logs
 """
 
 class TaskManager:
@@ -31,8 +32,10 @@ class TaskManager:
     """
     
     def __init__(self):
-        self.tasks_dir = Path(__file__).parent.parent / 'tasks'
-        self.config_file = self.tasks_dir / 'task_config.json'
+        self.project_root = Path(__file__).parent.parent
+        self.tasks_dir = self.project_root / 'tasks'
+        self.config_dir = self.project_root / 'config'
+        self.config_file = self.config_dir / 'task_config.json'
         self.setup_directories()
         self.init_config()
         self.logger = logging.getLogger(__name__)
@@ -46,6 +49,9 @@ class TaskManager:
         (self.tasks_dir / 'scripts').mkdir(exist_ok=True)
         (self.tasks_dir / 'output').mkdir(exist_ok=True)
         (self.tasks_dir / 'logs').mkdir(exist_ok=True)
+        
+        # Create config directory
+        self.config_dir.mkdir(exist_ok=True)
         
     def init_config(self) -> None:
         """Initialize config file if it doesn't exist"""
