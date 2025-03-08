@@ -311,4 +311,279 @@ class BloombergClient:
             
         except Exception as e:
             self.logger.error(f"Error retrieving security info: {e}")
+            return pd.DataFrame()
+
+    def get_corporate_actions(self, securities: List[str], 
+                             start_date: str, 
+                             end_date: str) -> pd.DataFrame:
+        """
+        Get corporate actions for a list of securities
+        
+        Args:
+            securities: List of Bloomberg security identifiers
+            start_date: Start date in format YYYY-MM-DD
+            end_date: End date in format YYYY-MM-DD
+            
+        Returns:
+            DataFrame with corporate action data
+        """
+        if not self.start_session():
+            return pd.DataFrame()
+        
+        try:
+            # Get reference data service
+            refdata_service = self.session.getService("//blp/refdata")
+            
+            # Create request for corporate actions
+            request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            for security in securities:
+                request.append("securities", security)
+                
+            # Add fields for different corporate actions
+            request.append("fields", "CORP_ACTION_START_DT")
+            request.append("fields", "CORP_ACTION_TYPE")
+            request.append("fields", "CORP_ACTION_STATUS")
+            request.append("fields", "CORP_ACTION_DESC")
+            
+            # Set date range for corporate actions
+            overrides = request.getElement("overrides")
+            start_override = overrides.appendElement()
+            start_override.setElement("fieldId", "START_DT")
+            start_override.setElement("value", start_date)
+            
+            end_override = overrides.appendElement()
+            end_override.setElement("fieldId", "END_DT")
+            end_override.setElement("value", end_date)
+            
+            # Send the request
+            self.session.sendRequest(request)
+            
+            # Process the response
+            corporate_actions = []
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
+                        security_data_array = msg.getElement("securityData")
+                        
+                        for i in range(security_data_array.numValues()):
+                            security_data = security_data_array.getValue(i)
+                            ticker = security_data.getElementAsString("security")
+                            
+                            if security_data.hasElement("fieldData"):
+                                field_data = security_data.getElement("fieldData")
+                                
+                                if field_data.hasElement("CORP_ACTION_START_DT") and field_data.hasElement("CORP_ACTION_TYPE"):
+                                    action_date = field_data.getElementAsString("CORP_ACTION_START_DT")
+                                    action_type = field_data.getElementAsString("CORP_ACTION_TYPE")
+                                    action_status = field_data.getElementAsString("CORP_ACTION_STATUS") if field_data.hasElement("CORP_ACTION_STATUS") else ""
+                                    action_desc = field_data.getElementAsString("CORP_ACTION_DESC") if field_data.hasElement("CORP_ACTION_DESC") else ""
+                                    
+                                    corporate_actions.append({
+                                        "ticker": ticker,
+                                        "action_date": action_date,
+                                        "action_type": action_type,
+                                        "action_status": action_status,
+                                        "action_description": action_desc
+                                    })
+                    
+            if event.eventType() == blpapi.Event.RESPONSE:
+                end_reached = True
+                
+            return pd.DataFrame(corporate_actions)
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving corporate actions: {e}")
+            return pd.DataFrame()
+        
+    def get_mergers_acquisitions(self, start_date: str, end_date: str, 
+                               status: str = "ANNOUNCED") -> pd.DataFrame:
+        """
+        Get merger and acquisition data
+        
+        Args:
+            start_date: Start date in format YYYY-MM-DD
+            end_date: End date in format YYYY-MM-DD
+            status: Status of M&A deals to retrieve (ANNOUNCED, COMPLETED, PENDING, etc.)
+            
+        Returns:
+            DataFrame with M&A data
+        """
+        if not self.start_session():
+            return pd.DataFrame()
+        
+        try:
+            # For M&A data, we use the EQS (Equity Screening) service
+            if not self.session.openService("//blp/exrsvc"):
+                self.logger.error("Failed to open EQS service")
+                return pd.DataFrame()
+            
+            exrsvc = self.session.getService("//blp/exrsvc")
+            
+            # Create request for EQS
+            request = exrsvc.createRequest("BeqsRequest")
+            
+            # Set universe parameters (Public companies in given markets)
+            universe = request.getElement("universe")
+            universe.setElement("stringValue", "PRIVATE_ASSETS_GLOBAL")
+            
+            # Set screening criteria for M&A deals
+            screen = request.getElement("screeningCriteria")
+            
+            # Add filter for deal type
+            filter1 = screen.appendElement("filter")
+            filter1.setElement("name", "Deal Type")
+            filter1.setElement("value", "M&A")
+            
+            # Add filter for date range
+            filter2 = screen.appendElement("filter")
+            filter2.setElement("name", "Announcement Date")
+            filter2.setElement("greaterThanEq", start_date)
+            filter2.setElement("lessThanEq", end_date)
+            
+            # Add filter for status
+            filter3 = screen.appendElement("filter")
+            filter3.setElement("name", "Deal Status")
+            filter3.setElement("value", status)
+            
+            # Select fields to retrieve
+            fields = request.getElement("fields")
+            
+            # Deal details
+            fields.appendValue("DealStatus")
+            fields.appendValue("AnnouncementDate")
+            fields.appendValue("ExpectedCompletionDate")
+            fields.appendValue("DealValue")
+            fields.appendValue("DealValueCurrency")
+            
+            # Target info
+            fields.appendValue("TargetName")
+            fields.appendValue("TargetTicker")
+            fields.appendValue("TargetIndustry")
+            fields.appendValue("TargetCountry")
+            
+            # Acquirer info
+            fields.appendValue("AcquirerName")
+            fields.appendValue("AcquirerTicker")
+            fields.appendValue("AcquirerIndustry")
+            fields.appendValue("AcquirerCountry")
+            
+            # Send the request
+            self.session.sendRequest(request)
+            
+            # Process the response
+            ma_deals = []
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("BeqsResponse"):
+                        if msg.hasElement("data"):
+                            data = msg.getElement("data")
+                            for i in range(data.numValues()):
+                                field_data = data.getValue(i)
+                                
+                                deal = {}
+                                for j in range(field_data.numElements()):
+                                    element = field_data.getElement(j)
+                                    name = element.name()
+                                    value = element.getValueAsString()
+                                    deal[name] = value
+                                    
+                                ma_deals.append(deal)
+                    
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    end_reached = True
+                    
+            return pd.DataFrame(ma_deals)
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving M&A data: {e}")
+            return pd.DataFrame()
+
+    def get_ticker_changes(self, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Get ticker changes data
+        
+        Args:
+            start_date: Start date in format YYYY-MM-DD
+            end_date: End date in format YYYY-MM-DD
+            
+        Returns:
+            DataFrame with ticker change data
+        """
+        if not self.start_session():
+            return pd.DataFrame()
+        
+        try:
+            # Get reference data service
+            refdata_service = self.session.getService("//blp/refdata")
+            
+            # Create request for CHNG_TICKER_EXCH query
+            request = refdata_service.createRequest("BeqsRequest")
+            
+            # Set universe parameters
+            universe = request.getElement("universe")
+            universe.setElement("stringValue", "EQY_TICKER_CHANGES")
+            
+            # Set screening criteria for ticker changes
+            screen = request.getElement("screeningCriteria")
+            
+            # Add filter for date range
+            filter1 = screen.appendElement("filter")
+            filter1.setElement("name", "Change Date")
+            filter1.setElement("greaterThanEq", start_date)
+            filter1.setElement("lessThanEq", end_date)
+            
+            # Select fields to retrieve
+            fields = request.getElement("fields")
+            fields.appendValue("Old Ticker")
+            fields.appendValue("New Ticker")
+            fields.appendValue("Old Name")
+            fields.appendValue("New Name")
+            fields.appendValue("Change Date")
+            fields.appendValue("Change Reason")
+            fields.appendValue("Security Type")
+            fields.appendValue("Country")
+            fields.appendValue("Exchange")
+            
+            # Send the request
+            self.session.sendRequest(request)
+            
+            # Process the response
+            ticker_changes = []
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("BeqsResponse"):
+                        if msg.hasElement("data"):
+                            data = msg.getElement("data")
+                            for i in range(data.numValues()):
+                                field_data = data.getValue(i)
+                                
+                                change = {}
+                                for j in range(field_data.numElements()):
+                                    element = field_data.getElement(j)
+                                    name = element.name()
+                                    value = element.getValueAsString()
+                                    change[name] = value
+                                    
+                                ticker_changes.append(change)
+                    
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    end_reached = True
+                    
+            return pd.DataFrame(ticker_changes)
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving ticker changes: {e}")
             return pd.DataFrame() 
