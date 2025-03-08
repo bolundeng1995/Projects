@@ -3,8 +3,9 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Any
 
 class RebalanceCalendar:
-    def __init__(self, database):
+    def __init__(self, database, bloomberg_client):
         self.db = database
+        self.bloomberg = bloomberg_client
         self._initialize_calendar()
     
     def _initialize_calendar(self):

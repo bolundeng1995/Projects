@@ -379,4 +379,18 @@ class IndexDatabase:
             return pd.read_sql_query(query, self.conn, params=tuple(params))
         except Exception as e:
             self.logger.error(f"Error getting corporate actions: {e}")
+            return pd.DataFrame()
+    
+    def get_all_indices(self) -> pd.DataFrame:
+        """
+        Get all indices stored in the database
+        
+        Returns:
+            DataFrame containing all indices
+        """
+        try:
+            query = "SELECT * FROM index_metadata"
+            return pd.read_sql_query(query, self.conn)
+        except Exception as e:
+            self.logger.error(f"Error retrieving indices: {e}")
             return pd.DataFrame() 
