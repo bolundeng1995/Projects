@@ -242,194 +242,257 @@ def calculate_insights(df):
     return insights
 
 def generate_charts(df, insights):
-    """Generate charts and graphs from the data and convert to base64 for HTML embedding."""
+    """Generate visualization charts for the report."""
     charts = {}
     
-    # 1. Flow Distribution by Action Type (Pie Chart)
-    if 'flow_by_type' in insights and not insights['flow_by_type'].empty:
-        plt.figure(figsize=(8, 6))
-        insights['flow_by_type'].plot(kind='pie', autopct='%1.1f%%', colors=COLORS, 
-                                     startangle=90, wedgeprops={'edgecolor': 'white'})
-        plt.title('ABS NET FLOW Distribution by Action Type', fontsize=14)
-        plt.ylabel('')
-        plt.tight_layout()
-        
-        # Convert to base64
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=100)
-        buffer.seek(0)
-        image_png = buffer.getvalue()
-        buffer.close()
-        plt.close()
-        
-        charts['flow_distribution'] = base64.b64encode(image_png).decode('utf-8')
+    # 1. Type Distribution Pie Chart
+    try:
+        if not df.empty and 'ACTION TYPE' in df.columns:
+            type_counts = df['ACTION TYPE'].value_counts()
+            
+            # Create the pie chart figure
+            fig, ax = plt.subplots(figsize=(6, 4))
+            wedges, texts, autotexts = ax.pie(
+                type_counts, 
+                labels=type_counts.index, 
+                autopct='%1.1f%%',
+                startangle=90,
+                colors=COLORS[:len(type_counts)]
+            )
+            
+            # Style the chart
+            ax.axis('equal')
+            plt.setp(autotexts, size=9, weight="bold", color="white")
+            plt.setp(texts, size=10)
+            
+            # Add count to each label
+            for i, text in enumerate(texts):
+                text.set_text(f"{text.get_text()} ({type_counts.values[i]})")
+            
+            plt.title('Distribution of Action Types')
+            
+            # Save to base64 for embedding in HTML
+            buffer = io.BytesIO()
+            plt.tight_layout()
+            plt.savefig(buffer, format='png', dpi=100)
+            buffer.seek(0)
+            img_str = base64.b64encode(buffer.read()).decode()
+            charts['type_distribution'] = img_str
+            plt.close(fig)
+    except Exception as e:
+        print(f"Error generating type distribution chart: {e}")
     
-    # 2. Timeline of Corporate Actions
-    if 'action_timeline' in insights and not insights['action_timeline'].empty:
-        timeline = insights['action_timeline']
-        plt.figure(figsize=(10, 4))
-        
-        # If we have more than one date, show as bars
-        if len(timeline) > 1:
-            bars = timeline.plot(kind='bar', color='#3498db')
+    # 2. Net Flow by Action Type - Only generate if we have flow data
+    try:
+        if 'ABS NET FLOW' in df.columns and not df['ABS NET FLOW'].dropna().empty:
+            # Group by action type and sum the net flow
+            flow_by_type = df.groupby('ACTION TYPE')['ABS NET FLOW'].sum().sort_values(ascending=False)
             
-            # Add urgent highlighting for dates within 3 trading days
-            urgent_dates = []
-            for date in timeline.index:
-                days = get_business_days_to_effective(date)
-                if days is not None and days <= 3:
-                    urgent_dates.append(date)
+            # Skip chart generation if all flow values are NaN or zero
+            if flow_by_type.sum() > 0:
+                # Create the bar chart
+                fig, ax = plt.subplots(figsize=(7, 5))
+                bars = ax.bar(
+                    flow_by_type.index,
+                    flow_by_type.values,
+                    color=COLORS[:len(flow_by_type)]
+                )
+                
+                # Add value labels on top of bars
+                for bar in bars:
+                    height = bar.get_height()
+                    if not pd.isna(height) and height > 0:
+                        ax.text(
+                            bar.get_x() + bar.get_width() / 2.,
+                            height * 1.01,
+                            f'${height/1e6:.1f}M',
+                            ha='center', va='bottom', 
+                            fontsize=8, rotation=0
+                        )
+                
+                plt.title('Net Flow by Action Type')
+                plt.xticks(rotation=45, ha='right')
+                plt.ylabel('Absolute Net Flow')
+                plt.tight_layout()
+                
+                # Save to base64
+                buffer = io.BytesIO()
+                plt.savefig(buffer, format='png', dpi=100)
+                buffer.seek(0)
+                img_str = base64.b64encode(buffer.read()).decode()
+                charts['flow_by_type'] = img_str
+                plt.close(fig)
+            else:
+                print("Skipping net flow chart - no positive flow values found")
+    except Exception as e:
+        print(f"Error generating net flow chart: {e}")
+    
+    # 3. Timeline Chart (Days to Effective Date)
+    try:
+        # Filter out entries with invalid effective dates
+        timeline_df = df[df['EFFECTIVE DATE'].notna()].copy()
+        
+        if not timeline_df.empty:
+            # Calculate business days to effective date
+            timeline_df['Business Days'] = timeline_df['EFFECTIVE DATE'].apply(get_business_days_to_effective)
+            timeline_df = timeline_df[timeline_df['Business Days'].notna()]
             
-            if urgent_dates:
-                urgent_subset = timeline[urgent_dates]
-                urgent_subset.plot(kind='bar', color='#e74c3c', ax=bars)
-            
-            plt.title('Number of Corporate Actions by Date', fontsize=14)
-            plt.ylabel('Number of Actions')
-            plt.xlabel('Effective Date')
-            plt.xticks(rotation=45)
-        else:
-            # Just one date, show as text
-            plt.text(0.5, 0.5, f"All actions effective on {timeline.index[0].strftime('%Y-%m-%d')}", 
-                    fontsize=14, ha='center')
-            plt.axis('off')
-        
-        plt.tight_layout()
-        
-        buffer = io.BytesIO()
-        plt.savefig(buffer, format='png', dpi=100)
-        buffer.seek(0)
-        image_png = buffer.getvalue()
-        buffer.close()
-        plt.close()
-        
-        charts['action_timeline'] = base64.b64encode(image_png).decode('utf-8')
+            if not timeline_df.empty:
+                # Group by days and count
+                days_counts = timeline_df.groupby('Business Days').size()
+                
+                # Create figure
+                fig, ax = plt.subplots(figsize=(8, 4))
+                
+                # Color urgent actions differently
+                colors = []
+                for day in days_counts.index:
+                    if day <= CONFIG["thresholds"]["urgent_days"]:
+                        colors.append(CONFIG["visualization"]["high_impact_color"])
+                    elif day <= CONFIG["thresholds"]["warning_days"]:
+                        colors.append(CONFIG["visualization"]["medium_impact_color"])
+                    else:
+                        colors.append(CONFIG["visualization"]["low_impact_color"])
+                
+                bars = ax.bar(days_counts.index, days_counts.values, color=colors)
+                
+                # Add count labels above bars
+                for bar in bars:
+                    height = bar.get_height()
+                    ax.text(
+                        bar.get_x() + bar.get_width() / 2.,
+                        height * 1.01,
+                        f'{int(height)}',
+                        ha='center', va='bottom', 
+                        fontsize=9
+                    )
+                
+                # Add vertical lines for thresholds
+                ax.axvline(x=CONFIG["thresholds"]["urgent_days"] + 0.5, color='#e74c3c', linestyle='--', alpha=0.5)
+                ax.axvline(x=CONFIG["thresholds"]["warning_days"] + 0.5, color='#f39c12', linestyle='--', alpha=0.5)
+                
+                plt.title('Timeline of Upcoming Corporate Actions')
+                plt.xlabel('Business Days Until Effective')
+                plt.ylabel('Number of Actions')
+                plt.tight_layout()
+                
+                # Save to base64
+                buffer = io.BytesIO()
+                plt.savefig(buffer, format='png', dpi=100)
+                buffer.seek(0)
+                img_str = base64.b64encode(buffer.read()).decode()
+                charts['timeline'] = img_str
+                plt.close(fig)
+    except Exception as e:
+        print(f"Error generating timeline chart: {e}")
     
     return charts
 
-def create_html_dashboard(df, insights, charts):
-    """Create an HTML dashboard with insights and visualizations."""
-    dashboard = ["""
-        <div style="background-color: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
-        <h2 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0;">
-            Corporate Actions Dashboard
-        </h2>
-        
-        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 15px;">
-    """]
+def create_placeholder_chart(message):
+    """Create a simple placeholder chart when data is missing."""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.text(0.5, 0.5, message, ha='center', va='center', fontsize=12)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis('off')
     
-    # Key Statistics Cards
-    dashboard.append("""
-        <div style="flex: 1; min-width: 250px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-            <h3 style="color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-top: 0;">
-                Key Statistics
+    # Save to base64
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', dpi=100)
+    buffer.seek(0)
+    img_str = base64.b64encode(buffer.read()).decode()
+    plt.close(fig)
+    return img_str
+
+def create_error_chart(error_message):
+    """Create a chart indicating an error occurred."""
+    fig, ax = plt.subplots(figsize=(6, 4))
+    ax.text(0.5, 0.5, error_message, ha='center', va='center', fontsize=10, color='red')
+    ax.text(0.5, 0.4, "Chart generation failed", ha='center', va='center', fontsize=8)
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.axis('off')
+    
+    # Save to base64
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', dpi=100)
+    buffer.seek(0)
+    img_str = base64.b64encode(buffer.read()).decode()
+    plt.close(fig)
+    return img_str
+
+def create_html_dashboard(df, insights, charts):
+    """Create HTML dashboard with charts and key insights."""
+    
+    dashboard = ['<div class="card"><h2>Dashboard</h2><div style="display: flex; flex-wrap: wrap;">']
+    
+    # Add summary stats
+    dashboard.append(f"""
+        <div style="flex: 1; min-width: 300px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+            <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0;">
+                Summary
             </h3>
             <ul style="list-style-type: none; padding-left: 0;">
+                <li style="margin-bottom: 10px; display: flex; align-items: center;">
+                    <span style="background-color: {CONFIG["visualization"]["high_impact_color"]}; color: white; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; margin-right: 10px;">!</span>
+                    <strong>High Impact Actions:</strong> {insights.get('high_impact_count', 0)}
+                </li>
+                <li style="margin-bottom: 10px; display: flex; align-items: center;">
+                    <span style="background-color: {CONFIG["visualization"]["medium_impact_color"]}; color: white; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; margin-right: 10px;">•</span>
+                    <strong>Urgent Actions:</strong> {insights.get('urgent_count', 0)} (due within {CONFIG["thresholds"]["urgent_days"]} trading days)
+                </li>
+                <li style="margin-bottom: 10px; display: flex; align-items: center;">
+                    <span style="background-color: #3498db; color: white; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; margin-right: 10px;">•</span>
+                    <strong>Total Actions:</strong> {len(df)}
+                </li>
+                <li style="margin-bottom: 10px; display: flex; align-items: center;">
+                    <span style="background-color: #95a5a6; color: white; border-radius: 50%; width: 24px; height: 24px; display: inline-flex; justify-content: center; align-items: center; margin-right: 10px;">•</span>
+                    <strong>Unique Action Types:</strong> {df['ACTION TYPE'].nunique()}
+                </li>
+            </ul>
+        </div>
     """)
     
-    # Total number of actions
-    dashboard.append(f"<li style='margin: 8px 0;'><b>Total Actions:</b> {len(df)}</li>")
-    
-    # Actions by status
-    if 'STATUS' in df.columns:
-        status_counts = df['STATUS'].value_counts()
-        for status, count in status_counts.items():
-            dashboard.append(f"<li style='margin: 8px 0;'><b>{status} Actions:</b> {count}</li>")
-    
-    # High impact actions
-    high_impact_count = len(df[df['Market Impact'] == 'HIGH'])
-    if high_impact_count > 0:
-        dashboard.append(f"<li style='margin: 8px 0;'><b>High Impact Actions:</b> {high_impact_count}</li>")
-    
-    # Urgent actions (next 3 trading days)
-    if 'EFFECTIVE DATE' in df.columns:
-        urgent_df = df.copy()
-        urgent_df['business_days'] = urgent_df['EFFECTIVE DATE'].apply(get_business_days_to_effective)
-        urgent_count = len(urgent_df[urgent_df['business_days'].between(0, 3)])
-        if urgent_count > 0:
-            dashboard.append(f"""<li style='margin: 8px 0;'><b>Urgent Actions:</b> {urgent_count} 
-                            <span style='color: #e74c3c; font-size: 0.9em;'>(≤ 3 trading days)</span></li>""")
-    
-    dashboard.append("</ul></div>")
-    
-    # Market Impact Analysis Card
-    if 'ABS NET FLOW' in df.columns:
-        dashboard.append("""
-            <div style="flex: 1; min-width: 250px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-top: 0;">
-                    Market Impact Analysis
-                </h3>
-                <ul style="list-style-type: none; padding-left: 0;">
-        """)
-        
-        # Total ABS NET FLOW
-        total_flow = df['ABS NET FLOW'].sum()
-        if not pd.isna(total_flow):
-            dashboard.append(f"""<li style='margin: 8px 0;'><b>Total ABS NET FLOW:</b> 
-                              ${total_flow/1e9:.2f}B</li>""")
-        
-        # Highest flow
-        max_flow_row = df.loc[df['ABS NET FLOW'].idxmax()]
-        if 'CURRENT TICKER' in max_flow_row and not pd.isna(max_flow_row['ABS NET FLOW']):
-            dashboard.append(f"""<li style='margin: 8px 0;'><b>Highest Flow:</b> 
-                              {max_flow_row['CURRENT TICKER']} (${max_flow_row['ABS NET FLOW']/1e9:.2f}B)</li>""")
-        
-        # Average flow
-        avg_flow = df['ABS NET FLOW'].mean()
-        if not pd.isna(avg_flow):
-            dashboard.append(f"""<li style='margin: 8px 0;'><b>Average Flow:</b> 
-                              ${avg_flow/1e6:.2f}M</li>""")
-        
-        # IWF change if available
-        if 'weighted_iwf_change' in insights:
-            dashboard.append(f"""<li style='margin: 8px 0;'><b>IWF Average Change:</b> 
-                              {insights['weighted_iwf_change']:.3f}</li>""")
-        
-        dashboard.append("</ul></div>")
-    
-    # Close first row of cards
-    dashboard.append("</div>")
-    
-    # Charts Row
-    dashboard.append("""
-        <div style="display: flex; flex-wrap: wrap; justify-content: space-between; margin-top: 20px;">
-    """)
-    
-    # Flow Distribution Chart
-    if 'flow_distribution' in charts:
+    # Types Distribution Chart
+    if 'type_distribution' in charts:
         dashboard.append(f"""
             <div style="flex: 1; min-width: 300px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-top: 0;">
-                    ABS NET FLOW Distribution
+                <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0;">
+                    Action Types
                 </h3>
                 <div style="text-align: center; margin-top: 15px;">
-                    <img src="data:image/png;base64,{charts['flow_distribution']}" style="max-width: 100%; height: auto;">
+                    <img src="data:image/png;base64,{charts['type_distribution']}" style="max-width: 100%; height: auto;">
                 </div>
             </div>
         """)
     
-    # Timeline Chart
-    if 'action_timeline' in charts:
+    # Flow Distribution Chart - only include if exists
+    if 'flow_by_type' in charts:
         dashboard.append(f"""
             <div style="flex: 1; min-width: 300px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <h3 style="color: #2c3e50; border-bottom: 1px solid #eee; padding-bottom: 10px; margin-top: 0;">
-                    Timeline of Actions
+                <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0;">
+                    Net Flow by Action Type
                 </h3>
                 <div style="text-align: center; margin-top: 15px;">
-                    <img src="data:image/png;base64,{charts['action_timeline']}" style="max-width: 100%; height: auto;">
+                    <img src="data:image/png;base64,{charts['flow_by_type']}" style="max-width: 100%; height: auto;">
                 </div>
             </div>
         """)
     
-    # Removed: Growth/Value Distribution Chart
-    # Removed: Correlation Heatmap
+    # Timeline Chart - only include if exists
+    if 'timeline' in charts:
+        dashboard.append(f"""
+            <div style="flex: 1; min-width: 300px; margin: 10px; background-color: white; border-radius: 8px; padding: 15px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <h3 style="color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; margin-top: 0;">
+                    Action Timeline
+                </h3>
+                <div style="text-align: center; margin-top: 15px;">
+                    <img src="data:image/png;base64,{charts['timeline']}" style="max-width: 100%; height: auto;">
+                </div>
+            </div>
+        """)
     
-    # Close charts row
-    dashboard.append("</div>")
-    
-    # Close main dashboard div
-    dashboard.append("</div>")
-    
+    dashboard.append('</div></div>')
     return '\n'.join(dashboard)
 
 def create_html_summary(df):
@@ -622,6 +685,158 @@ def format_ticker_with_link(ticker):
     ticker_clean = str(ticker).strip()
     
     return f'<a href="{base_url}{ticker_clean}" target="_blank" style="color: #3498db; text-decoration: none;">{ticker_clean}</a>'
+
+def format_row_details_html(row):
+    """Format the details of a single row in HTML with all columns."""
+    effective_date = pd.to_datetime(row['EFFECTIVE DATE']) if pd.notna(row['EFFECTIVE DATE']) else None
+    business_days = get_business_days_to_effective(effective_date) if effective_date else None
+    
+    urgency_style = ''
+    if business_days is not None:
+        if business_days <= CONFIG["thresholds"]["urgent_days"]:
+            urgency_style = 'background-color: #ffebee; border-left: 3px solid #e74c3c;'
+        elif business_days <= CONFIG["thresholds"]["warning_days"]:
+            urgency_style = 'background-color: #fff8e1; border-left: 3px solid #f39c12;'
+    
+    # Format the effective date nicely
+    formatted_date = "Not specified"
+    business_days_text = ""
+    if effective_date is not None:
+        formatted_date = effective_date.strftime('%B %d, %Y')
+        if business_days is not None:
+            if business_days == 0:
+                business_days_text = "Today"
+            elif business_days == 1:
+                business_days_text = "1 trading day"
+            else:
+                business_days_text = f"{business_days} trading days"
+    
+    # Get impact color
+    impact = row.get('Market Impact', 'UNDEFINED')
+    impact_colors = {
+        'HIGH': CONFIG["visualization"]["high_impact_color"],
+        'MEDIUM': CONFIG["visualization"]["medium_impact_color"],
+        'LOW': CONFIG["visualization"]["low_impact_color"],
+        'UNDEFINED': CONFIG["visualization"]["undefined_impact_color"]
+    }
+    impact_color = impact_colors.get(impact, impact_colors['UNDEFINED'])
+    impact_text_color = 'white' if impact in ['HIGH', 'MEDIUM'] else 'black'
+    
+    # Format ticker with link
+    ticker_html = format_ticker_with_link(row.get('CURRENT TICKER', ''))
+    
+    html = [f"""
+        <div style="padding: 15px; margin-bottom: 15px; border-radius: 5px; {urgency_style}">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <div>
+                    <span style="font-size: 1.1em; font-weight: bold;">{ticker_html}</span>
+                    <span style="margin-left: 8px; color: #7f8c8d;">{row.get('CURRENT COMPANY NAME', '')}</span>
+                </div>
+                <div>
+                    <span style="background-color: {impact_color}; color: {impact_text_color}; padding: 3px 8px; border-radius: 3px; font-weight: bold;">
+                        {impact}
+                    </span>
+                </div>
+            </div>
+            
+            <div style="display: flex; margin-bottom: 15px; flex-wrap: wrap;">
+                <div style="flex: 1; min-width: 250px; margin-right: 15px;">
+                    <div style="margin: 5px 0;">
+                        <span style="color: #666;">Action Type:</span> <strong>{row.get('ACTION TYPE', 'Unknown')}</strong>
+                    </div>
+                    <div style="margin: 5px 0;">
+                        <span style="color: #666;">Status:</span> <span>{row.get('STATUS', 'Unknown')}</span>
+                    </div>
+                    <div style="margin: 5px 0;">
+                        <span style="color: #666;">Effective Date:</span> {formatted_date}
+                        <span style="margin-left: 10px; font-size: 0.9em; color: #666;">
+                            ({business_days_text} until effective)
+                        </span>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="display: flex; flex-wrap: wrap; gap: 15px; margin-top: 10px;">
+    """]
+
+    # Format comparison fields (like CURRENT IWF → NEW IWF) in a clean layout
+    comparison_fields = [
+        ('IWF', 'CURRENT IWF', 'NEW IWF'),
+        ('AWF', 'CURRENT AWF', 'NEW AWF'),
+        ('INDEX SHARES', 'CURRENT INDEX SHARES', 'NEW INDEX SHARES')
+    ]
+    
+    html.append('<div style="display: flex; flex-wrap: wrap; gap: 20px; margin: 10px 0;">')
+    
+    for field_name, current_field, new_field in comparison_fields:
+        if current_field in row and new_field in row and (pd.notna(row[current_field]) or pd.notna(row[new_field])):
+            current_val = row[current_field] if pd.notna(row[current_field]) else "N/A"
+            new_val = row[new_field] if pd.notna(row[new_field]) else "N/A"
+            
+            # Format numbers with commas if they're numeric
+            if isinstance(current_val, (int, float)):
+                current_val = f"{current_val:,}" if field_name != 'IWF' and field_name != 'AWF' else f"{current_val:.2f}"
+            if isinstance(new_val, (int, float)):
+                new_val = f"{new_val:,}" if field_name != 'IWF' and field_name != 'AWF' else f"{new_val:.2f}"
+            
+            html.append(f"""
+                <div style="background-color: #f8f9fa; padding: 8px 12px; border-radius: 4px; min-width: 200px;">
+                    <div style="font-weight: bold; color: #2c3e50; margin-bottom: 5px;">{field_name}</div>
+                    <div style="display: flex; align-items: center;">
+                        <span style="color: #7f8c8d;">{current_val}</span>
+                        <span style="margin: 0 8px; color: #95a5a6;">→</span>
+                        <span style="font-weight: bold;">{new_val}</span>
+                    </div>
+                </div>
+            """)
+    
+    # Add net flow with special formatting
+    if 'ABS NET FLOW' in row and pd.notna(row['ABS NET FLOW']):
+        formatted_flow = f"{row['ABS NET FLOW']:,.0f}" if isinstance(row['ABS NET FLOW'], (int, float)) else str(row['ABS NET FLOW'])
+        html.append(f"""
+            <div style="margin: 5px 0; display: flex;">
+                <span style="width: 120px; color: #666;">ABS NET FLOW:</span>
+                <span style="font-weight: bold;">{formatted_flow}</span>
+            </div>
+        """)
+    
+    html.append('</div>')  # Close comparison fields div
+    
+    # Special handling for Comments field (if present and not empty)
+    if 'Comments' in row and pd.notna(row['Comments']) and row['Comments'].strip():
+        # Process comments - handle potential long text
+        comments = str(row['Comments'])
+        
+        html.append(f"""
+            <div style="margin: 15px 0; padding: 10px; background-color: #e8f4f8; border-radius: 3px; border-left: 3px solid #3498db;">
+                <div style="font-weight: bold; color: #2980b9; margin-bottom: 5px;">Comments</div>
+                <div style="padding: 8px; background-color: white; border-radius: 3px; white-space: pre-wrap; line-height: 1.5;">
+                    {comments}
+                </div>
+            </div>
+        """)
+    
+    # Add other relevant fields in a flex container
+    excluded_cols = ['ACTION TYPE', 'ACTION GROUP', 'STATUS', 'EFFECTIVE DATE', 'CURRENT TICKER', 
+                     'CURRENT COMPANY NAME', 'Market Impact', 'Sequence', 'Comments',
+                     'CURRENT IWF', 'NEW IWF', 'CURRENT AWF', 'NEW AWF',
+                     'CURRENT INDEX SHARES', 'NEW INDEX SHARES', 'ABS NET FLOW']
+    
+    other_cols = [col for col in row.index if col not in excluded_cols and pd.notna(row[col])]
+    
+    if other_cols:
+        html.append('<div style="display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px;">')
+        for col in other_cols:
+            value = row[col]
+            html.append(f"""
+                <div style="background-color: #e9ecef; padding: 3px 8px; border-radius: 3px;">
+                    <span style="color: #666;">{col}:</span> {value}
+                </div>
+            """)
+        html.append('</div>')
+    
+    html.append('</div>')  # Close main row div
+    return '\n'.join(html)
 
 def main():
     try:
