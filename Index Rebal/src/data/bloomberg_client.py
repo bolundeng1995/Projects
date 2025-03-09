@@ -15,10 +15,18 @@ class BloombergClient:
         
     def start_session(self):
         """Start a Bloomberg API session"""
-        if self.session is not None and self.session.openService():
-            return True
-            
         try:
+            # If we already have a session, check if it's working by testing service availability
+            if self.session is not None:
+                try:
+                    # Try to get the service - this will fail if session is not active
+                    self.session.getService("//blp/refdata")
+                    return True
+                except Exception:
+                    # If failed, session is likely inactive, recreate it
+                    self.logger.info("Existing session is inactive, creating a new one")
+                    self.session = None
+            
             # Initialize session options
             session_options = blpapi.SessionOptions()
             session_options.setServerHost(self.host)

@@ -393,4 +393,49 @@ class IndexDatabase:
             return pd.read_sql_query(query, self.conn)
         except Exception as e:
             self.logger.error(f"Error retrieving indices: {e}")
-            return pd.DataFrame() 
+            return pd.DataFrame()
+    
+    def delete_index(self, index_id: str) -> bool:
+        """
+        Delete an index and all its associated data
+        
+        Args:
+            index_id: Internal index identifier to delete
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Start a transaction
+            self.conn.execute("BEGIN TRANSACTION")
+            
+            # Delete from index_metadata
+            self.conn.execute(
+                "DELETE FROM index_metadata WHERE index_id = ?", 
+                (index_id,)
+            )
+            
+            # Delete associated data
+            self.conn.execute(
+                "DELETE FROM current_constituents WHERE index_id = ?", 
+                (index_id,)
+            )
+            self.conn.execute(
+                "DELETE FROM constituent_changes WHERE index_id = ?", 
+                (index_id,)
+            )
+            self.conn.execute(
+                "DELETE FROM rebalance_events WHERE index_id = ?", 
+                (index_id,)
+            )
+            
+            # Commit transaction
+            self.conn.execute("COMMIT")
+            self.logger.info(f"Deleted index {index_id} and associated data")
+            return True
+            
+        except Exception as e:
+            # Rollback in case of error
+            self.conn.execute("ROLLBACK")
+            self.logger.error(f"Error deleting index {index_id}: {e}")
+            return False 
