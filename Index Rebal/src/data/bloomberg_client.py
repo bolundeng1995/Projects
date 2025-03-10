@@ -662,22 +662,29 @@ class BloombergClient:
         
         try:
             import xbbg.blp as blp
+            from datetime import datetime
             
             # Import our mappings
             from data.config.bloomberg_mappings import INDEX_CONSTITUENT_FIELDS
+            
+            # Convert dates to Bloomberg format (YYYYMMDD)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%Y%m%d")  # Format as YYYYMMDD
+            bloomberg_end_date = end_dt.strftime("%Y%m%d")      # Format as YYYYMMDD
             
             # Get index member weights at start date
             start_result = blp.bds(
                 tickers=index_ticker,
                 flds="INDX_MWEIGHT", 
-                REFERENCE_DATE=start_date
+                END_DATE_OVERRIDE=bloomberg_start_date
             )
             
             # Get index member weights at end date
             end_result = blp.bds(
                 tickers=index_ticker,
                 flds="INDX_MWEIGHT", 
-                REFERENCE_DATE=end_date
+                END_DATE_OVERRIDE=bloomberg_end_date
             )
             
             # If no data returned for either date, return empty DataFrame
