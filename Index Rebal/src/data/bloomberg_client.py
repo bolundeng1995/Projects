@@ -771,37 +771,6 @@ class BloombergClient:
             self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
             return pd.DataFrame()
 
-    def _get_index_changes_alternative(self, index_ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
-        """Alternative method to get index changes when INDX_MWEIGHT_HIST is not available"""
-        self.logger.info(f"Using alternative method to get changes for {index_ticker}")
-        
-        try:
-            # Get reference data service
-            refdata_service = self.session.getService("//blp/refdata")
-            
-            # Convert dates to Bloomberg format (MM/DD/YYYY)
-            from datetime import datetime
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-            bloomberg_start_date = start_dt.strftime("%m/%d/%Y")
-            bloomberg_end_date = end_dt.strftime("%m/%d/%Y")
-            
-            # Create request
-            request = refdata_service.createRequest("HistoricalDataRequest")
-            
-            # Set the security
-            request.append("securities", index_ticker)
-            
-            # Set fields for constituents at different points in time
-            request.append("fields", "INDX_MEMBERS")
-            
-            # Set date range
-            request.set("startDate", bloomberg_start_date)  # Use Bloomberg format
-            request.set("endDate", bloomberg_end_date)      # Use Bloomberg format
-            request.set("periodicitySelection", "MONTHLY")  # Get monthly snapshots
-            
-            # Rest of the method remains the same...
-
     def get_current_data(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
         """
         Get current market data for a list of securities
