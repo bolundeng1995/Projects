@@ -172,19 +172,50 @@ def main():
         # ------------------------------------------------------------
         logger.info("DEMO 7: Getting index changes")
         
-        index_changes = bloomberg.get_index_changes(
-            index_ticker="SPX Index",
-            start_date=start_date_1y,
-            end_date=end_date
-        )
+        # Set dates for comparison (e.g., start of month vs end of month)
+        start_date = "2023-01-01"
+        end_date = "2023-03-31"
+        
+        # Get index changes by comparing members between two dates
+        index_changes = bloomberg.get_index_changes("SPX Index", start_date, end_date)
         
         if not index_changes.empty:
-            logger.info("S&P 500 index changes:")
-            print(index_changes)
-            print(f"Total changes: {len(index_changes)}")
-            print("\n")
+            # Count changes by type
+            additions = index_changes[index_changes['change_type'] == 'ADD']
+            deletions = index_changes[index_changes['change_type'] == 'DELETE']
+            weight_changes = index_changes[index_changes['change_type'] == 'WEIGHT_CHG']
+            
+            # Print summary
+            logger.info(f"S&P 500 changes from {start_date} to {end_date}:")
+            logger.info(f"  Additions: {len(additions)}")
+            logger.info(f"  Deletions: {len(deletions)}")
+            logger.info(f"  Weight changes: {len(weight_changes)}")
+            
+            # Print details of each change type
+            if not additions.empty:
+                logger.info("\nAdditions:")
+                print(additions[['ticker', 'new_weight']].head(5))
+                if len(additions) > 5:
+                    print(f"... and {len(additions) - 5} more additions")
+            
+            if not deletions.empty:
+                logger.info("\nDeletions:")
+                print(deletions[['ticker', 'old_weight']].head(5))
+                if len(deletions) > 5:
+                    print(f"... and {len(deletions) - 5} more deletions")
+            
+            if not weight_changes.empty:
+                logger.info("\nLargest weight changes:")
+                # Sort by absolute weight change
+                weight_changes['abs_change'] = abs(weight_changes['new_weight'] - weight_changes['old_weight'])
+                largest_changes = weight_changes.sort_values('abs_change', ascending=False)
+                print(largest_changes[['ticker', 'old_weight', 'new_weight']].head(5))
+                if len(weight_changes) > 5:
+                    print(f"... and {len(weight_changes) - 5} more weight changes")
         else:
-            logger.info("No index changes found in the last year")
+            logger.warning("No index changes found")
+        
+        print("\n")
         
     except Exception as e:
         logger.error(f"Error during Bloomberg data retrieval: {e}")

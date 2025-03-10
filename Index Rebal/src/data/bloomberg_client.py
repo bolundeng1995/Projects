@@ -648,7 +648,7 @@ class BloombergClient:
 
     def get_index_changes(self, index_ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Get historical index constituent changes using xbbg
+        Calculate index constituent changes by comparing members and weights between two dates
         
         Args:
             index_ticker: Bloomberg index ticker (e.g., "SPX Index")
@@ -656,53 +656,117 @@ class BloombergClient:
             end_date: End date in YYYY-MM-DD format
             
         Returns:
-            DataFrame containing index changes
+            DataFrame containing index changes (additions, deletions, weight changes)
         """
-        self.logger.info(f"Getting index changes for {index_ticker} from {start_date} to {end_date}")
+        self.logger.info(f"Calculating index changes for {index_ticker} from {start_date} to {end_date}")
         
         try:
             import xbbg.blp as blp
             
-            # Use xbbg to get index weight history
-            result = blp.bds(
+            # Get index member weights at start date
+            start_result = blp.bds(
                 tickers=index_ticker,
-                flds='INDX_MWEIGHT_HIST',
-                overrides={
-                    'START_DT': start_date,
-                    'END_DT': end_date
-                }
+                flds="INDX_MWEIGHT", 
+                REFERENCE_DATE=start_date
             )
             
-            # If no data returned, return empty DataFrame
-            if result is None or result.empty:
-                self.logger.warning(f"No index changes found for {index_ticker} in date range")
+            # Get index member weights at end date
+            end_result = blp.bds(
+                tickers=index_ticker,
+                flds="INDX_MWEIGHT", 
+                REFERENCE_DATE=end_date
+            )
+            
+            # If no data returned for either date, return empty DataFrame
+            if (start_result is None or start_result.empty) and (end_result is None or end_result.empty):
+                self.logger.warning(f"No index data found for {index_ticker} on the specified dates")
                 return pd.DataFrame()
             
-            # Reset index to make it easier to iterate through rows
-            df = result.reset_index()
+            # Process start date members
+            start_members = {}
+            if start_result is not None and not start_result.empty:
+                start_df = start_result.reset_index()
+                for _, row in start_df.iterrows():
+                    ticker = row.get('Ticker', None)
+                    if ticker:
+                        start_members[ticker] = {
+                            'weight': float(row.get('Weight', 0.0)) if pd.notna(row.get('Weight', 0.0)) else 0.0,
+                            'name': row.get('Name', '')
+                        }
             
-            # Extract the relevant columns and rename them to our expected format
+            # Process end date members
+            end_members = {}
+            if end_result is not None and not end_result.empty:
+                end_df = end_result.reset_index()
+                for _, row in end_df.iterrows():
+                    ticker = row.get('Ticker', None)
+                    if ticker:
+                        end_members[ticker] = {
+                            'weight': float(row.get('Weight', 0.0)) if pd.notna(row.get('Weight', 0.0)) else 0.0,
+                            'name': row.get('Name', '')
+                        }
+            
+            # Calculate changes
             changes = []
-            for _, row in df.iterrows():
-                change = {
-                    'effective_date': row.get('Effective Date', None),
-                    'announcement_date': row.get('Announcement Date', None),
-                    'ticker': row.get('Ticker', None),
-                    'bloomberg_ticker': row.get('ID_BB_SEC', None),
-                    'change_type': row.get('Type', None),
-                    'old_weight': float(row.get('Old Weight', 0.0)) if pd.notna(row.get('Old Weight', 0.0)) else 0.0,
-                    'new_weight': float(row.get('New Weight', 0.0)) if pd.notna(row.get('New Weight', 0.0)) else 0.0,
-                    'reason': row.get('Reason', None)
-                }
-                changes.append(change)
             
-            return pd.DataFrame(changes)
-        
+            # Find additions (tickers in end_members but not in start_members)
+            for ticker in end_members:
+                if ticker not in start_members:
+                    changes.append({
+                        'effective_date': end_date,
+                        'announcement_date': None,
+                        'ticker': ticker,
+                        'bloomberg_ticker': f"{ticker} Equity",
+                        'change_type': 'ADD',
+                        'old_weight': 0.0,
+                        'new_weight': end_members[ticker]['weight'],
+                        'reason': 'Index addition'
+                    })
+                else:
+                    # Weight changes (tickers in both, but with different weights)
+                    old_weight = start_members[ticker]['weight']
+                    new_weight = end_members[ticker]['weight']
+                    if abs(new_weight - old_weight) > 0.001:  # Consider small changes as noise
+                        changes.append({
+                            'effective_date': end_date,
+                            'announcement_date': None,
+                            'ticker': ticker,
+                            'bloomberg_ticker': f"{ticker} Equity",
+                            'change_type': 'WEIGHT_CHG',
+                            'old_weight': old_weight,
+                            'new_weight': new_weight,
+                            'reason': 'Weight change'
+                        })
+            
+            # Find deletions (tickers in start_members but not in end_members)
+            for ticker in start_members:
+                if ticker not in end_members:
+                    changes.append({
+                        'effective_date': end_date,
+                        'announcement_date': None,
+                        'ticker': ticker,
+                        'bloomberg_ticker': f"{ticker} Equity",
+                        'change_type': 'DELETE',
+                        'old_weight': start_members[ticker]['weight'],
+                        'new_weight': 0.0,
+                        'reason': 'Index deletion'
+                    })
+            
+            # Create DataFrame and sort by change_type
+            df = pd.DataFrame(changes)
+            if not df.empty:
+                # Define custom sort order for change_type
+                change_type_order = {'ADD': 0, 'DELETE': 1, 'WEIGHT_CHG': 2}
+                df['change_type_order'] = df['change_type'].map(change_type_order)
+                df = df.sort_values(['change_type_order', 'ticker']).drop('change_type_order', axis=1)
+            
+            return df
+            
         except ImportError:
             self.logger.error("xbbg package not installed. Install with 'pip install xbbg'")
             return pd.DataFrame()
         except Exception as e:
-            self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
+            self.logger.error(f"Error calculating index changes for {index_ticker}: {e}")
             return pd.DataFrame()
 
     def _standardize_date(self, date_str: str) -> str:
