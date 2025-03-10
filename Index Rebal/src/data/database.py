@@ -257,15 +257,24 @@ class IndexDatabase:
             self.conn.rollback()
             return False
     
-    def get_price_data(self, ticker: str, start_date: Optional[str] = None,
-                     end_date: Optional[str] = None) -> pd.DataFrame:
-        """Get price data for a ticker within a date range"""
+    def get_price_data(self, ticker: str, 
+                      start_date: Optional[str] = None,
+                      end_date: Optional[str] = None,
+                      limit: Optional[int] = None) -> pd.DataFrame:
+        """
+        Get price data for a specific ticker
+        
+        Args:
+            ticker: Ticker symbol
+            start_date: Optional start date (YYYY-MM-DD)
+            end_date: Optional end date (YYYY-MM-DD)
+            limit: Optional limit of rows to return
+            
+        Returns:
+            DataFrame containing price data
+        """
         try:
-            query = '''
-                SELECT date, open, high, low, close, volume, adj_close
-                FROM price_data
-                WHERE ticker = ?
-            '''
+            query = "SELECT * FROM price_data WHERE ticker = ?"
             params = [ticker]
             
             if start_date:
@@ -276,15 +285,12 @@ class IndexDatabase:
                 query += " AND date <= ?"
                 params.append(end_date)
                 
-            query += " ORDER BY date"
+            query += " ORDER BY date DESC"
             
-            df = pd.read_sql_query(query, self.conn, params=tuple(params))
+            if limit:
+                query += f" LIMIT {limit}"
             
-            # Convert date column to datetime and set as index
-            df['date'] = pd.to_datetime(df['date'])
-            df.set_index('date', inplace=True)
-            
-            return df
+            return pd.read_sql_query(query, self.conn, params=tuple(params))
         except Exception as e:
             self.logger.error(f"Error getting price data for {ticker}: {e}")
             return pd.DataFrame()
@@ -455,4 +461,98 @@ class IndexDatabase:
             # Rollback in case of error
             self.conn.execute("ROLLBACK")
             self.logger.error(f"Error deleting index {index_id}: {e}")
-            return False 
+            return False
+    
+    def get_historical_constituents(self, index_id: str, as_of_date: str) -> pd.DataFrame:
+        """
+        Get index constituents as they were on a specific date
+        
+        Args:
+            index_id: Index identifier
+            as_of_date: Date in format YYYY-MM-DD to get constituents for
+            
+        Returns:
+            DataFrame containing constituents as of the specified date
+        """
+        try:
+            # First get all additions up to the specified date
+            additions_query = '''
+                SELECT ticker, bloomberg_ticker, implementation_date, new_weight
+                FROM constituent_changes 
+                WHERE index_id = ? 
+                AND event_type = 'ADD'
+                AND implementation_date <= ?
+                ORDER BY implementation_date
+            '''
+            
+            additions = pd.read_sql_query(additions_query, self.conn, 
+                                        params=(index_id, as_of_date))
+            
+            # Get all deletions up to the specified date
+            deletions_query = '''
+                SELECT ticker, implementation_date 
+                FROM constituent_changes 
+                WHERE index_id = ? 
+                AND event_type = 'DELETE'
+                AND implementation_date <= ?
+                ORDER BY implementation_date
+            '''
+            
+            deletions = pd.read_sql_query(deletions_query, self.conn,
+                                        params=(index_id, as_of_date))
+            
+            # If we have no historical data, return empty DataFrame
+            if additions.empty:
+                self.logger.warning(f"No historical constituent data for {index_id} as of {as_of_date}")
+                return pd.DataFrame()
+            
+            # For each ticker, get the most recent addition or weight change
+            # that is still before or on the specified date
+            historical_constituents = []
+            
+            # Process additions (or weight changes)
+            for ticker in additions['ticker'].unique():
+                # Get all changes for this ticker
+                ticker_changes = additions[additions['ticker'] == ticker]
+                
+                # Get the most recent change before or on the specified date
+                most_recent = ticker_changes.sort_values('implementation_date', ascending=False).iloc[0]
+                
+                # Check if it was later deleted before the specified date
+                deleted = ticker in deletions['ticker'].values
+                if deleted:
+                    deletion_date = deletions[deletions['ticker'] == ticker]['implementation_date'].max()
+                    if deletion_date > most_recent['implementation_date']:
+                        # Skip this ticker, it was deleted after its last addition
+                        continue
+                    
+                # Add to our list of historical constituents
+                historical_constituents.append({
+                    'ticker': most_recent['ticker'],
+                    'bloomberg_ticker': most_recent['bloomberg_ticker'],
+                    'weight': most_recent['new_weight'],
+                    'last_updated': most_recent['implementation_date']
+                })
+            
+            # Convert to DataFrame
+            result = pd.DataFrame(historical_constituents)
+            
+            # Try to supplement with more data if available
+            if not result.empty:
+                # Get current constituent data to fill in missing fields
+                current = self.get_current_constituents(index_id)
+                
+                if not current.empty:
+                    # Use current data to fill in fields like sector, industry, etc.
+                    result = pd.merge(
+                        result, 
+                        current[['ticker', 'company_name', 'sector', 'industry', 'market_cap']],
+                        on='ticker', 
+                        how='left'
+                    )
+            
+            return result
+        
+        except Exception as e:
+            self.logger.error(f"Error getting historical constituents for {index_id} as of {as_of_date}: {e}")
+            return pd.DataFrame() 

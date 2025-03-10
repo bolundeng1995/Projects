@@ -40,17 +40,20 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+# Define the lookback period for all data imports (90 days)
+LOOKBACK_DAYS = 180  # Changed from 730 days (2 years) to 90 days
+
 # Define indices to import
 INDICES = [
     # Index_ID, Index_Name, Bloomberg_Ticker, Rebalance_Frequency, Description
     ("SP500", "S&P 500", "SPX Index", "Quarterly", "Large-cap US equities"),
-    ("SP400", "S&P MidCap 400", "MID Index", "Quarterly", "Mid-cap US equities"),
-    ("SP600", "S&P SmallCap 600", "SML Index", "Quarterly", "Small-cap US equities"),
-    ("RUSSELL1000", "Russell 1000", "RIY Index", "Annual", "Large-cap US equities"),
-    ("RUSSELL2000", "Russell 2000", "RTY Index", "Annual", "Small-cap US equities"),
-    ("NASDAQ100", "Nasdaq 100", "NDX Index", "Quarterly", "Large-cap tech-focused equities"),
-    ("MSCI_EAFE", "MSCI EAFE", "MXEA Index", "Quarterly", "Developed markets ex-US and Canada"),
-    ("MSCI_EM", "MSCI Emerging Markets", "MXEF Index", "Quarterly", "Emerging markets")
+    # ("SP400", "S&P MidCap 400", "MID Index", "Quarterly", "Mid-cap US equities"),
+    # ("SP600", "S&P SmallCap 600", "SML Index", "Quarterly", "Small-cap US equities"),
+    # ("RUSSELL1000", "Russell 1000", "RIY Index", "Annual", "Large-cap US equities"),
+    # ("RUSSELL2000", "Russell 2000", "RTY Index", "Annual", "Small-cap US equities"),
+    # ("NASDAQ100", "Nasdaq 100", "NDX Index", "Quarterly", "Large-cap tech-focused equities"),
+    # ("MSCI_EAFE", "MSCI EAFE", "MXEA Index", "Quarterly", "Developed markets ex-US and Canada"),
+    # ("MSCI_EM", "MSCI Emerging Markets", "MXEF Index", "Quarterly", "Emerging markets")
 ]
 
 def initialize_database(db_path='index_history.db'):
@@ -71,11 +74,11 @@ def add_indices(db):
         )
     logger.info(f"Added {len(INDICES)} indices to database")
 
-def import_historical_prices(db, bloomberg, lookback_days=730):  # 2 years
+def import_historical_prices(db, bloomberg, lookback_days=LOOKBACK_DAYS):
     """Import historical prices for indices"""
     price_importer = PriceDataImporter(db, bloomberg)
     
-    # Calculate date range
+    # Calculate date range for logging only
     end_date = datetime.now().date()
     start_date = end_date - timedelta(days=lookback_days)
     start_date_str = start_date.strftime('%Y-%m-%d')
@@ -87,12 +90,10 @@ def import_historical_prices(db, bloomberg, lookback_days=730):  # 2 years
     indices_df = db.get_all_indices()
     index_ids = indices_df['index_id'].tolist()
     
-    # Import index prices
+    # Import index prices using lookback_days
     for index_id in tqdm(index_ids, desc="Importing index prices"):
         logger.info(f"Importing prices for {index_id}")
-        price_importer.update_index_prices([index_id], 
-                                          start_date=start_date_str, 
-                                          end_date=end_date_str)
+        price_importer.update_index_prices([index_id], lookback_days=lookback_days)
         time.sleep(1)  # Avoid overwhelming Bloomberg API
     
     logger.info("Completed importing index prices")
@@ -103,9 +104,12 @@ def import_historical_constituents(db, bloomberg, indices_df):
     constituent_importer = IndexConstituentImporter(db, bloomberg)
     price_importer = PriceDataImporter(db, bloomberg)
     
-    # Calculate 2-year lookback date
+    # Use the global lookback period
+    lookback_days = LOOKBACK_DAYS
+    
+    # Calculate date range for logging purposes
     end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=730)
+    start_date = end_date - timedelta(days=lookback_days)
     start_date_str = start_date.strftime('%Y-%m-%d')
     end_date_str = end_date.strftime('%Y-%m-%d')
     
@@ -131,14 +135,12 @@ def import_historical_constituents(db, bloomberg, indices_df):
                 
                 for i, c_row in tqdm(constituents.iterrows(), desc=f"{index_id} constituents", total=len(constituents)):
                     ticker = c_row['ticker']
-                    price_importer.update_constituent_prices(ticker, 
-                                                           start_date=start_date_str, 
-                                                           end_date=end_date_str)
+                    price_importer.update_constituent_prices(ticker, lookback_days=lookback_days)
                     time.sleep(0.5)  # Avoid overwhelming Bloomberg API
             
             # Import historical changes
             logger.info(f"Importing historical constituent changes for {index_id}")
-            constituent_importer.import_historical_changes(index_id, lookback_days=730)
+            constituent_importer.import_historical_changes(index_id, lookback_days=lookback_days)
             
             # Allow some time before moving to next index
             time.sleep(5)
@@ -150,7 +152,7 @@ def import_rebalance_calendar(db, bloomberg):
     event_count = calendar.update_all_calendars()
     logger.info(f"Added {event_count} rebalance events to calendar")
 
-def import_corporate_actions(db, bloomberg, lookback_days=730):
+def import_corporate_actions(db, bloomberg, lookback_days=LOOKBACK_DAYS):
     """Import corporate actions for index constituents"""
     corp_handler = CorporateActionHandler(db, bloomberg)
     
