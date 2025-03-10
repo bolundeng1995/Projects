@@ -182,6 +182,89 @@ def import_corporate_actions(db, bloomberg, lookback_days=730):
                 corp_handler.import_corporate_actions(batch, start_date_str, end_date_str)
                 time.sleep(2)  # Give the API a break
 
+def display_imported_data_summary(db):
+    """Display a summary of the data that was imported into the database"""
+    print("\n===== IMPORT SUMMARY =====\n")
+    
+    # 1. Show indices summary
+    indices = db.get_all_indices()
+    print(f"Imported {len(indices)} indices:")
+    for _, row in indices.iterrows():
+        print(f"  • {row['index_name']} ({row['index_id']}) - {row['bloomberg_ticker']}")
+    
+    # 2. Show constituent counts with first/last 5
+    print("\nConstituent samples:")
+    for index_id in indices['index_id']:
+        constituents = db.get_current_constituents(index_id)
+        print(f"\n  • {index_id}: {len(constituents)} constituents")
+        
+        if not constituents.empty:
+            print("\n    First 5 constituents by weight:")
+            print(constituents[['ticker', 'company_name', 'weight']].head(5).to_string(index=False))
+            
+            if len(constituents) > 10:  # Only show last 5 if we have enough rows
+                print("\n    Last 5 constituents by weight:")
+                print(constituents[['ticker', 'company_name', 'weight']].tail(5).to_string(index=False))
+    
+    # 3. Show price data first/last 5 rows
+    print("\nPrice data samples:")
+    for index_id in indices['index_id']:
+        # Get the Bloomberg ticker for this index
+        ticker = indices[indices['index_id'] == index_id]['bloomberg_ticker'].iloc[0]
+        ticker_clean = ticker.split()[0]  # Remove " Index" part
+        
+        # Get all price data (or at least enough to show head/tail)
+        price_data = db.get_price_data(ticker_clean, limit=1000)  # Limit to avoid huge queries
+        
+        if not price_data.empty:
+            total_rows = len(price_data)
+            print(f"\n  • {index_id} prices ({total_rows} days of data):")
+            
+            print("\n    Most recent 5 days:")
+            print(price_data[['date', 'open', 'high', 'low', 'close']].head(5).to_string(index=False))
+            
+            if total_rows > 10:  # Only show oldest 5 if we have enough rows
+                print("\n    Oldest 5 days:")
+                print(price_data[['date', 'open', 'high', 'low', 'close']].tail(5).to_string(index=False))
+    
+    # 4. Show rebalance events first/last 5
+    print("\nRebalance events:")
+    rebalance_events = db.get_upcoming_rebalance_events(days_ahead=365)  # Get a full year
+    if not rebalance_events.empty:
+        total_events = len(rebalance_events)
+        print(f"Found {total_events} upcoming rebalance events")
+        
+        print("\n  Earliest upcoming events:")
+        for _, event in rebalance_events.head(5).iterrows():
+            print(f"  • {event['index_id']}: Announcement: {event['announcement_date']}, Implementation: {event['implementation_date']}")
+        
+        if total_events > 10:
+            print("\n  Latest upcoming events:")
+            for _, event in rebalance_events.tail(5).iterrows():
+                print(f"  • {event['index_id']}: Announcement: {event['announcement_date']}, Implementation: {event['implementation_date']}")
+    else:
+        print("  • No upcoming rebalance events found")
+    
+    # 5. Show corporate actions first/last 5
+    print("\nCorporate actions:")
+    actions = db.get_corporate_actions()  # Get all actions
+    if not actions.empty:
+        total_actions = len(actions)
+        print(f"Found {total_actions} corporate actions")
+        
+        print("\n  Most recent actions:")
+        for _, action in actions.head(5).iterrows():
+            print(f"  • {action['ticker']}: {action['action_type']} on {action['effective_date']} - {action['description']}")
+        
+        if total_actions > 10:
+            print("\n  Oldest actions:")
+            for _, action in actions.tail(5).iterrows():
+                print(f"  • {action['ticker']}: {action['action_type']} on {action['effective_date']} - {action['description']}")
+    else:
+        print("  • No corporate actions found")
+    
+    print("\n===== END OF SUMMARY =====")
+
 def main():
     """Main function to run the data import process"""
     # Initialize database
@@ -213,6 +296,9 @@ def main():
         import_corporate_actions(db, bloomberg)
         
         logger.info("Historical data import completed successfully")
+        
+        # Display summary of imported data
+        display_imported_data_summary(db)
         
     except Exception as e:
         logger.error(f"Error during data import: {e}")
