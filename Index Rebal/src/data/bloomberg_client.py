@@ -677,23 +677,19 @@ class BloombergClient:
             
             # Create request
             request = refdata_service.createRequest("ReferenceDataRequest")
-            
-            # Set the security
             request.append("securities", index_ticker)
-            
-            # Set the fields - these will vary depending on the exact Bloomberg API for index changes
             request.append("fields", "INDX_MWEIGHT_HIST")
             
             # Set date range as override
             overrides = request.getElement("overrides")
             
-            start_date_override = overrides.appendElement()
-            start_date_override.setElement("fieldId", "START_DT")
-            start_date_override.setElement("value", bloomberg_start_date)  # Use Bloomberg format
+            start_override = overrides.appendElement()
+            start_override.setElement("fieldId", "START_DT")
+            start_override.setElement("value", bloomberg_start_date)
             
-            end_date_override = overrides.appendElement()
-            end_date_override.setElement("fieldId", "END_DT")
-            end_date_override.setElement("value", bloomberg_end_date)  # Use Bloomberg format
+            end_override = overrides.appendElement()
+            end_override.setElement("fieldId", "END_DT")
+            end_override.setElement("value", bloomberg_end_date)
             
             # Send request
             self.session.sendRequest(request)
@@ -707,78 +703,81 @@ class BloombergClient:
                 
                 for msg in event:
                     if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        # Process reference data
+                        # Process security data
+                        if not msg.hasElement("securityData"):
+                            continue
+                            
                         security_data_array = msg.getElement("securityData")
                         
                         for i in range(security_data_array.numValues()):
                             security_data = security_data_array.getValue(i)
                             
-                            if security_data.hasElement("fieldData"):
-                                field_data = security_data.getElement("fieldData")
+                            # Skip if no field data
+                            if not security_data.hasElement("fieldData"):
+                                continue
                                 
-                                if field_data.hasElement("INDX_MWEIGHT_HIST"):
-                                    weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
-                                    
-                                    # Process historical weights
-                                    for j in range(weight_hist.numValues()):
-                                        weight_data = weight_hist.getValue(j)
-                                        
-                                        # Handle dates properly - they may come back in MM/DD/YYYY format
-                                        effective_date = None
-                                        announcement_date = None
-                                        
-                                        if weight_data.hasElement("Effective Date"):
-                                            date_str = weight_data.getElementAsString("Effective Date")
-                                            try:
-                                                # Try parsing as MM/DD/YYYY first
-                                                date_obj = datetime.strptime(date_str, "%m/%d/%Y")
-                                                effective_date = date_obj.strftime("%Y-%m-%d")
-                                            except ValueError:
-                                                # If that fails, try as YYYY-MM-DD
-                                                try:
-                                                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                                                    effective_date = date_str
-                                                except ValueError:
-                                                    # If all parsing fails, use raw string
-                                                    effective_date = date_str
-                                        
-                                        if weight_data.hasElement("Announcement Date"):
-                                            date_str = weight_data.getElementAsString("Announcement Date")
-                                            try:
-                                                # Try parsing as MM/DD/YYYY first
-                                                date_obj = datetime.strptime(date_str, "%m/%d/%Y")
-                                                announcement_date = date_obj.strftime("%Y-%m-%d")
-                                            except ValueError:
-                                                # If that fails, try as YYYY-MM-DD
-                                                try:
-                                                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
-                                                    announcement_date = date_str
-                                                except ValueError:
-                                                    # If all parsing fails, use raw string
-                                                    announcement_date = date_str
-                                        
-                                        # Extract change data
-                                        change = {
-                                            'effective_date': effective_date,
-                                            'announcement_date': announcement_date,
-                                            'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
-                                            'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
-                                            'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
-                                            'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
-                                            'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
-                                            'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
-                                        }
-                                        
-                                        changes.append(change)
-            
-            if event.eventType() == blpapi.Event.RESPONSE:
-                end_reached = True
+                            field_data = security_data.getElement("fieldData")
+                            
+                            # Skip if no weight history
+                            if not field_data.hasElement("INDX_MWEIGHT_HIST"):
+                                continue
+                                
+                            weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
+                            
+                            # Process each weight change
+                            for j in range(weight_hist.numValues()):
+                                weight_data = weight_hist.getValue(j)
+                                
+                                # Extract and standardize dates
+                                effective_date = None
+                                if weight_data.hasElement("Effective Date"):
+                                    date_str = weight_data.getElementAsString("Effective Date")
+                                    effective_date = self._standardize_date(date_str)
+                                
+                                announcement_date = None
+                                if weight_data.hasElement("Announcement Date"):
+                                    date_str = weight_data.getElementAsString("Announcement Date")
+                                    announcement_date = self._standardize_date(date_str)
+                                
+                                # Create change record
+                                change = {
+                                    'effective_date': effective_date,
+                                    'announcement_date': announcement_date,
+                                    'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
+                                    'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
+                                    'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
+                                    'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
+                                    'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
+                                    'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
+                                }
+                                
+                                changes.append(change)
+                
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    end_reached = True
             
             return pd.DataFrame(changes)
             
         except Exception as e:
             self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
             return pd.DataFrame()
+
+    def _standardize_date(self, date_str: str) -> str:
+        """Convert a date string to YYYY-MM-DD format"""
+        from datetime import datetime
+        
+        try:
+            # Try parsing as MM/DD/YYYY first (Bloomberg format)
+            date_obj = datetime.strptime(date_str, "%m/%d/%Y")
+            return date_obj.strftime("%Y-%m-%d")
+        except ValueError:
+            try:
+                # Try parsing as YYYY-MM-DD
+                date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                return date_str
+            except ValueError:
+                # Return original if parsing fails
+                return date_str
 
     def get_current_data(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
         """
