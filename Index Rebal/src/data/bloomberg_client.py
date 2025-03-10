@@ -648,7 +648,7 @@ class BloombergClient:
 
     def get_index_changes(self, index_ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Get historical index constituent changes
+        Get historical index constituent changes using xbbg
         
         Args:
             index_ticker: Bloomberg index ticker (e.g., "SPX Index")
@@ -661,103 +661,46 @@ class BloombergClient:
         self.logger.info(f"Getting index changes for {index_ticker} from {start_date} to {end_date}")
         
         try:
-            # Initialize a session if needed
-            if not self.start_session():
+            import xbbg.blp as blp
+            
+            # Use xbbg to get index weight history
+            result = blp.bds(
+                tickers=index_ticker,
+                flds='INDX_MWEIGHT_HIST',
+                overrides={
+                    'START_DT': start_date,
+                    'END_DT': end_date
+                }
+            )
+            
+            # If no data returned, return empty DataFrame
+            if result is None or result.empty:
+                self.logger.warning(f"No index changes found for {index_ticker} in date range")
                 return pd.DataFrame()
             
-            # Convert dates to Bloomberg format (MM/DD/YYYY)
-            from datetime import datetime
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-            bloomberg_start_date = start_dt.strftime("%m/%d/%Y")
-            bloomberg_end_date = end_dt.strftime("%m/%d/%Y")
+            # Reset index to make it easier to iterate through rows
+            df = result.reset_index()
             
-            # Get reference data service
-            refdata_service = self.session.getService("//blp/refdata")
-            
-            # Create request
-            request = refdata_service.createRequest("ReferenceDataRequest")
-            request.append("securities", index_ticker)
-            request.append("fields", "INDX_MWEIGHT_HIST")
-            
-            # Set date range as override
-            overrides = request.getElement("overrides")
-            
-            start_override = overrides.appendElement()
-            start_override.setElement("fieldId", "START_DT")
-            start_override.setElement("value", bloomberg_start_date)
-            
-            end_override = overrides.appendElement()
-            end_override.setElement("fieldId", "END_DT")
-            end_override.setElement("value", bloomberg_end_date)
-            
-            # Send request
-            self.session.sendRequest(request)
-            
-            # Process response
+            # Extract the relevant columns and rename them to our expected format
             changes = []
-            end_reached = False
-            
-            while not end_reached:
-                event = self.session.nextEvent(500)
-                
-                for msg in event:
-                    if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        # Process security data
-                        if not msg.hasElement("securityData"):
-                            continue
-                            
-                        security_data_array = msg.getElement("securityData")
-                        
-                        for i in range(security_data_array.numValues()):
-                            security_data = security_data_array.getValue(i)
-                            
-                            # Skip if no field data
-                            if not security_data.hasElement("fieldData"):
-                                continue
-                                
-                            field_data = security_data.getElement("fieldData")
-                            
-                            # Skip if no weight history
-                            if not field_data.hasElement("INDX_MWEIGHT_HIST"):
-                                continue
-                                
-                            weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
-                            
-                            # Process each weight change
-                            for j in range(weight_hist.numValues()):
-                                weight_data = weight_hist.getValue(j)
-                                
-                                # Extract and standardize dates
-                                effective_date = None
-                                if weight_data.hasElement("Effective Date"):
-                                    date_str = weight_data.getElementAsString("Effective Date")
-                                    effective_date = self._standardize_date(date_str)
-                                
-                                announcement_date = None
-                                if weight_data.hasElement("Announcement Date"):
-                                    date_str = weight_data.getElementAsString("Announcement Date")
-                                    announcement_date = self._standardize_date(date_str)
-                                
-                                # Create change record
-                                change = {
-                                    'effective_date': effective_date,
-                                    'announcement_date': announcement_date,
-                                    'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
-                                    'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
-                                    'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
-                                    'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
-                                    'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
-                                    'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
-                                }
-                                
-                                changes.append(change)
-                
-                if event.eventType() == blpapi.Event.RESPONSE:
-                    end_reached = True
+            for _, row in df.iterrows():
+                change = {
+                    'effective_date': row.get('Effective Date', None),
+                    'announcement_date': row.get('Announcement Date', None),
+                    'ticker': row.get('Ticker', None),
+                    'bloomberg_ticker': row.get('ID_BB_SEC', None),
+                    'change_type': row.get('Type', None),
+                    'old_weight': float(row.get('Old Weight', 0.0)) if pd.notna(row.get('Old Weight', 0.0)) else 0.0,
+                    'new_weight': float(row.get('New Weight', 0.0)) if pd.notna(row.get('New Weight', 0.0)) else 0.0,
+                    'reason': row.get('Reason', None)
+                }
+                changes.append(change)
             
             return pd.DataFrame(changes)
-            
+        
+        except ImportError:
+            self.logger.error("xbbg package not installed. Install with 'pip install xbbg'")
+            return pd.DataFrame()
         except Exception as e:
             self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
             return pd.DataFrame()
