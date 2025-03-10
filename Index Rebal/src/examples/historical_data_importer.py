@@ -1,0 +1,225 @@
+#!/usr/bin/env python
+"""
+Historical Data Importer
+
+This script imports 2 years of historical data for major indices and their constituents.
+It fetches data from Bloomberg and stores it in the SQLite database.
+
+Usage:
+    python historical_data_importer.py
+
+Requirements:
+    - Bloomberg Terminal with API access
+    - Valid Bloomberg subscription with access to index data
+"""
+
+import os
+import logging
+import pandas as pd
+from datetime import datetime, timedelta
+import time
+from tqdm import tqdm
+
+# Import core classes
+from src.data.database import IndexDatabase
+from src.data.bloomberg_client import BloombergClient
+from src.data.importers.price_data import PriceDataImporter
+from src.data.importers.index_constituents import IndexConstituentImporter
+from src.data.calendar import RebalanceCalendar
+from src.data.corporate_action_handler import CorporateActionHandler
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler('historical_import.log'),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+
+# Define indices to import
+INDICES = [
+    # Index_ID, Index_Name, Bloomberg_Ticker, Rebalance_Frequency, Description
+    ("SP500", "S&P 500", "SPX Index", "Quarterly", "Large-cap US equities"),
+    ("SP400", "S&P MidCap 400", "MID Index", "Quarterly", "Mid-cap US equities"),
+    ("SP600", "S&P SmallCap 600", "SML Index", "Quarterly", "Small-cap US equities"),
+    ("RUSSELL1000", "Russell 1000", "RIY Index", "Annual", "Large-cap US equities"),
+    ("RUSSELL2000", "Russell 2000", "RTY Index", "Annual", "Small-cap US equities"),
+    ("NASDAQ100", "Nasdaq 100", "NDX Index", "Quarterly", "Large-cap tech-focused equities"),
+    ("MSCI_EAFE", "MSCI EAFE", "MXEA Index", "Quarterly", "Developed markets ex-US and Canada"),
+    ("MSCI_EM", "MSCI Emerging Markets", "MXEF Index", "Quarterly", "Emerging markets")
+]
+
+def initialize_database(db_path='index_history.db'):
+    """Initialize the database with indices to track"""
+    db = IndexDatabase(db_path)
+    logger.info(f"Database initialized at {db_path}")
+    return db
+
+def add_indices(db):
+    """Add indices to the database"""
+    for index_id, index_name, bloomberg_ticker, rebalance_frequency, description in INDICES:
+        db.add_index(
+            index_id=index_id,
+            index_name=index_name,
+            bloomberg_ticker=bloomberg_ticker,
+            rebalance_frequency=rebalance_frequency,
+            description=description
+        )
+    logger.info(f"Added {len(INDICES)} indices to database")
+
+def import_historical_prices(db, bloomberg, lookback_days=730):  # 2 years
+    """Import historical prices for indices"""
+    price_importer = PriceDataImporter(db, bloomberg)
+    
+    # Calculate date range
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=lookback_days)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+    
+    logger.info(f"Importing price history from {start_date_str} to {end_date_str}")
+    
+    # Get indices from database
+    indices_df = db.get_all_indices()
+    index_ids = indices_df['index_id'].tolist()
+    
+    # Import index prices
+    for index_id in tqdm(index_ids, desc="Importing index prices"):
+        logger.info(f"Importing prices for {index_id}")
+        price_importer.update_index_prices([index_id], 
+                                          start_date=start_date_str, 
+                                          end_date=end_date_str)
+        time.sleep(1)  # Avoid overwhelming Bloomberg API
+    
+    logger.info("Completed importing index prices")
+    return indices_df
+
+def import_historical_constituents(db, bloomberg, indices_df):
+    """Import historical constituents and their price data"""
+    constituent_importer = IndexConstituentImporter(db, bloomberg)
+    price_importer = PriceDataImporter(db, bloomberg)
+    
+    # Calculate 2-year lookback date
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=730)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+    
+    # Process one index at a time - starting with SPX
+    for _, row in tqdm(indices_df.iterrows(), desc="Processing indices", total=len(indices_df)):
+        index_id = row['index_id']
+        bloomberg_ticker = row['bloomberg_ticker']
+        
+        # Process SPX first, then others
+        if index_id == "SP500" or (index_id != "SP500" and indices_df.iloc[0]['index_id'] != "SP500"):
+            logger.info(f"Importing current constituents for {index_id}")
+            
+            # Import current constituents
+            count = constituent_importer.import_current_constituents(index_id)
+            logger.info(f"Imported {count} constituents for {index_id}")
+            
+            # Get constituent list
+            constituents = db.get_current_constituents(index_id)
+            
+            if not constituents.empty:
+                # Import constituent price history
+                logger.info(f"Importing price history for {len(constituents)} constituents of {index_id}")
+                
+                for i, c_row in tqdm(constituents.iterrows(), desc=f"{index_id} constituents", total=len(constituents)):
+                    ticker = c_row['ticker']
+                    price_importer.update_constituent_prices(ticker, 
+                                                           start_date=start_date_str, 
+                                                           end_date=end_date_str)
+                    time.sleep(0.5)  # Avoid overwhelming Bloomberg API
+            
+            # Import historical changes
+            logger.info(f"Importing historical constituent changes for {index_id}")
+            constituent_importer.import_historical_changes(index_id, lookback_days=730)
+            
+            # Allow some time before moving to next index
+            time.sleep(5)
+
+def import_rebalance_calendar(db, bloomberg):
+    """Import rebalance dates for all indices"""
+    calendar = RebalanceCalendar(db, bloomberg)
+    logger.info("Updating rebalance calendar for all indices")
+    event_count = calendar.update_all_calendars()
+    logger.info(f"Added {event_count} rebalance events to calendar")
+
+def import_corporate_actions(db, bloomberg, lookback_days=730):
+    """Import corporate actions for index constituents"""
+    corp_handler = CorporateActionHandler(db, bloomberg)
+    
+    # Calculate date range
+    end_date = datetime.now().date()
+    start_date = end_date - timedelta(days=lookback_days)
+    start_date_str = start_date.strftime('%Y-%m-%d')
+    end_date_str = end_date.strftime('%Y-%m-%d')
+    
+    logger.info(f"Importing corporate actions from {start_date_str} to {end_date_str}")
+    
+    # Import for all indices
+    indices_df = db.get_all_indices()
+    
+    for _, row in tqdm(indices_df.iterrows(), desc="Processing corporate actions", total=len(indices_df)):
+        index_id = row['index_id']
+        
+        # Get constituents for this index
+        constituents = db.get_current_constituents(index_id)
+        
+        if not constituents.empty:
+            tickers = constituents['ticker'].tolist()
+            logger.info(f"Importing corporate actions for {len(tickers)} constituents of {index_id}")
+            
+            # Import in batches to avoid overwhelming the API
+            batch_size = 50
+            for i in range(0, len(tickers), batch_size):
+                batch = tickers[i:i+batch_size]
+                corp_handler.import_corporate_actions(batch, start_date_str, end_date_str)
+                time.sleep(2)  # Give the API a break
+
+def main():
+    """Main function to run the data import process"""
+    # Initialize database
+    db = initialize_database()
+    
+    # Connect to Bloomberg
+    bloomberg = BloombergClient()
+    
+    if not bloomberg.start_session():
+        logger.error("Failed to connect to Bloomberg. Exiting.")
+        return
+        
+    logger.info("Successfully connected to Bloomberg API")
+    
+    try:
+        # Add indices to database
+        add_indices(db)
+        
+        # Import historical prices for indices
+        indices_df = import_historical_prices(db, bloomberg)
+        
+        # Import constituent data and prices (SPX first, then others)
+        import_historical_constituents(db, bloomberg, indices_df.sort_values(by="index_id", ascending=False))
+        
+        # Import rebalance calendar
+        import_rebalance_calendar(db, bloomberg)
+        
+        # Import corporate actions
+        import_corporate_actions(db, bloomberg)
+        
+        logger.info("Historical data import completed successfully")
+        
+    except Exception as e:
+        logger.error(f"Error during data import: {e}")
+    finally:
+        # Close Bloomberg session
+        bloomberg.stop_session()
+        logger.info("Bloomberg session closed")
+
+if __name__ == "__main__":
+    main() 
