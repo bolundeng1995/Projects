@@ -229,7 +229,7 @@ class BloombergClient:
                 
                 for msg in event:
                     if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        security_data = msg.getElement("securityData")
+                        security_data = msg.getElement("securityData").getValue(0)
                         
                         if security_data.hasElement("fieldData"):
                             field_data = security_data.getElement("fieldData")
@@ -244,18 +244,13 @@ class BloombergClient:
                                     # Get member ticker and weight
                                     member = {}
                                     
-                                    if member_data.hasElement("Member Ticker"):
-                                        member["member_ticker"] = member_data.getElementAsString("Member Ticker")
+                                    if member_data.hasElement("Member Ticker and Exchange Code"):
+                                        member["member_ticker"] = member_data.getElementAsString("Member Ticker and Exchange Code")
                                     else:
-                                        continue  # Skip if no ticker
+                                        continue  # Skip if no ticker                      
                                         
-                                    if member_data.hasElement("Member Short Name"):
-                                        member["member_name"] = member_data.getElementAsString("Member Short Name")
-                                    else:
-                                        member["member_name"] = ""
-                                        
-                                    if member_data.hasElement("Percent Weight"):
-                                        member["weight"] = member_data.getElementAsFloat("Percent Weight")
+                                    if member_data.hasElement("Percentage Weight"):
+                                        member["weight"] = member_data.getElementAsFloat("Percentage Weight")
                                     else:
                                         member["weight"] = 0.0
                                         
@@ -673,13 +668,33 @@ class BloombergClient:
             # Get reference data service
             refdata_service = self.session.getService("//blp/refdata")
             
-            # Create request
-            request = refdata_service.createRequest("ReferenceDataRequest")
+            # First, check if the ticker is valid
+            validate_request = refdata_service.createRequest("ReferenceDataRequest")
+            validate_request.append("securities", index_ticker)
+            validate_request.append("fields", "ID_BB_COMPANY")
             
-            # Set the security
+            self.session.sendRequest(validate_request)
+            valid_ticker = False
+            
+            # Process validation response
+            event = self.session.nextEvent(500)
+            for msg in event:
+                if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
+                    if not msg.hasElement("responseError"):
+                        valid_ticker = True
+                    else:
+                        error_msg = msg.getElement("responseError").getElementAsString("message")
+                        self.logger.error(f"Bloomberg API error: {error_msg}")
+            
+            if not valid_ticker:
+                self.logger.error(f"Invalid index ticker: {index_ticker}")
+                return pd.DataFrame()
+            
+            # Create request for index changes
+            request = refdata_service.createRequest("ReferenceDataRequest")
             request.append("securities", index_ticker)
             
-            # Set the fields - these will vary depending on the exact Bloomberg API for index changes
+            # Try the INDX_MWEIGHT_HIST field
             request.append("fields", "INDX_MWEIGHT_HIST")
             
             # Set date range as override
@@ -693,9 +708,29 @@ class BloombergClient:
             end_date_override.setElement("fieldId", "END_DT")
             end_date_override.setElement("value", end_date)
             
-            # Send request
+            # Send request and check for bad request first
             self.session.sendRequest(request)
+            event = self.session.nextEvent(500)
+            has_error = False
             
+            for msg in event:
+                if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
+                    if msg.hasElement("responseError"):
+                        error_element = msg.getElement("responseError")
+                        error_msg = error_element.getElementAsString("message")
+                        self.logger.error(f"Bloomberg API error: {error_msg}")
+                        has_error = True
+                    
+                    if msg.toString().find("bad request") >= 0:
+                        self.logger.error(f"Bad request detected: {msg.toString()}")
+                        has_error = True
+            
+            if has_error:
+                # Try an alternative approach for index changes
+                self.logger.info("Using alternative approach for index changes")
+                return self._get_index_changes_alternative(index_ticker, start_date, end_date)
+            
+            # Process remaining responses for the normal approach
             # Process response
             changes = []
             end_reached = False
@@ -705,41 +740,167 @@ class BloombergClient:
                 
                 for msg in event:
                     if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        # Process reference data
-                        security_data = msg.getElement("securityData")
+                        # Check for response errors
+                        if msg.hasElement("responseError"):
+                            error_element = msg.getElement("responseError")
+                            error_msg = error_element.getElementAsString("message")
+                            self.logger.error(f"Bloomberg API error: {error_msg}")
+                            continue
                         
-                        if security_data.hasElement("fieldData"):
-                            field_data = security_data.getElement("fieldData")
+                        # Get the security data array
+                        security_data_array = msg.getElement("securityData")
+                        
+                        # Iterate through all securities in the response
+                        for i in range(security_data_array.numValues()):
+                            security_data = security_data_array.getValue(i)
                             
-                            if field_data.hasElement("INDX_MWEIGHT_HIST"):
-                                weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
+                            # Check for security-level errors
+                            if security_data.hasElement("securityError"):
+                                error = security_data.getElement("securityError")
+                                self.logger.error(f"Security error for {index_ticker}: {error.getElementAsString('message')}")
+                                continue
+                            
+                            # Process field data
+                            if security_data.hasElement("fieldData"):
+                                field_data = security_data.getElement("fieldData")
                                 
-                                # Process historical weights
-                                for i in range(weight_hist.numValues()):
-                                    weight_data = weight_hist.getValue(i)
+                                if field_data.hasElement("INDX_MWEIGHT_HIST"):
+                                    weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
                                     
-                                    # Extract change data
-                                    change = {
-                                        'effective_date': weight_data.getElementAsString("Effective Date") if weight_data.hasElement("Effective Date") else None,
-                                        'announcement_date': weight_data.getElementAsString("Announcement Date") if weight_data.hasElement("Announcement Date") else None,
-                                        'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
-                                        'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
-                                        'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
-                                        'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
-                                        'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
-                                        'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
-                                    }
-                                    
-                                    changes.append(change)
+                                    # Process historical weights
+                                    for j in range(weight_hist.numValues()):
+                                        weight_data = weight_hist.getValue(j)
+                                        
+                                        # Extract change data
+                                        change = {
+                                            'effective_date': weight_data.getElementAsString("Effective Date") if weight_data.hasElement("Effective Date") else None,
+                                            'announcement_date': weight_data.getElementAsString("Announcement Date") if weight_data.hasElement("Announcement Date") else None,
+                                            'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
+                                            'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
+                                            'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
+                                            'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
+                                            'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
+                                            'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
+                                        }
+                                        
+                                        changes.append(change)
+                                else:
+                                    # Check for field-level errors
+                                    if security_data.hasElement("fieldExceptions"):
+                                        field_exceptions = security_data.getElement("fieldExceptions")
+                                        for j in range(field_exceptions.numValues()):
+                                            field_exception = field_exceptions.getValue(j)
+                                            field_id = field_exception.getElementAsString("fieldId")
+                                            error_info = field_exception.getElement("errorInfo")
+                                            error_message = error_info.getElementAsString("message")
+                                            self.logger.error(f"Field error for {index_ticker} field {field_id}: {error_message}")
             
-            # Move this check inside the while loop
-                if event.eventType() == blpapi.Event.RESPONSE:
-                    end_reached = True
+            if event.eventType() == blpapi.Event.RESPONSE:
+                end_reached = True
             
             return pd.DataFrame(changes)
             
         except Exception as e:
             self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
+            return pd.DataFrame()
+
+    def _get_index_changes_alternative(self, index_ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """Alternative method to get index changes when INDX_MWEIGHT_HIST is not available"""
+        self.logger.info(f"Using alternative method to get changes for {index_ticker}")
+        
+        try:
+            # Get reference data service
+            refdata_service = self.session.getService("//blp/refdata")
+            
+            # Create request
+            request = refdata_service.createRequest("HistoricalDataRequest")
+            
+            # Set the security
+            request.append("securities", index_ticker)
+            
+            # Set fields for constituents at different points in time
+            request.append("fields", "INDX_MEMBERS")
+            
+            # Set date range
+            request.set("startDate", start_date)
+            request.set("endDate", end_date)
+            request.set("periodicitySelection", "MONTHLY")  # Get monthly snapshots
+            
+            # Send request
+            self.session.sendRequest(request)
+            
+            # Process response
+            all_members = {}  # Dict mapping dates to sets of members
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("HistoricalDataResponse"):
+                        security_data = msg.getElement("securityData")
+                        field_data_array = security_data.getElement("fieldData")
+                        
+                        for i in range(field_data_array.numValues()):
+                            field_data = field_data_array.getValue(i)
+                            date = field_data.getElementAsDatetime("date").strftime("%Y-%m-%d")
+                            
+                            if field_data.hasElement("INDX_MEMBERS"):
+                                members_data = field_data.getElement("INDX_MEMBERS")
+                                members = set()
+                                
+                                for j in range(members_data.numValues()):
+                                    member = members_data.getValueAsString(j)
+                                    members.add(member)
+                                
+                                all_members[date] = members
+            
+            if event.eventType() == blpapi.Event.RESPONSE:
+                end_reached = True
+            
+            # Analyze changes between snapshots
+            changes = []
+            dates = sorted(all_members.keys())
+            
+            for i in range(1, len(dates)):
+                prev_date = dates[i-1]
+                curr_date = dates[i]
+                
+                prev_members = all_members[prev_date]
+                curr_members = all_members[curr_date]
+                
+                # Find additions
+                additions = curr_members - prev_members
+                for ticker in additions:
+                    changes.append({
+                        'effective_date': curr_date,
+                        'announcement_date': None,
+                        'ticker': ticker,
+                        'bloomberg_ticker': f"{ticker} Equity",
+                        'change_type': 'ADD',
+                        'old_weight': 0.0,
+                        'new_weight': 0.0,
+                        'reason': 'Detected by comparison'
+                    })
+                
+                # Find deletions
+                deletions = prev_members - curr_members
+                for ticker in deletions:
+                    changes.append({
+                        'effective_date': curr_date,
+                        'announcement_date': None,
+                        'ticker': ticker,
+                        'bloomberg_ticker': f"{ticker} Equity",
+                        'change_type': 'DELETE',
+                        'old_weight': 0.0,
+                        'new_weight': 0.0,
+                        'reason': 'Detected by comparison'
+                    })
+            
+            return pd.DataFrame(changes)
+            
+        except Exception as e:
+            self.logger.error(f"Error in alternative method for index changes: {e}")
             return pd.DataFrame()
 
     def get_current_data(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
