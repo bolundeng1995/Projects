@@ -273,4 +273,87 @@ class CorporateActionHandler:
             
         except Exception as e:
             self.logger.error(f"Error updating ticker references for {old_ticker} to {new_ticker}: {e}")
-            self.db.conn.rollback() 
+            self.db.conn.rollback()
+
+    def import_corporate_actions(self, tickers: List[str], start_date: str, end_date: str) -> int:
+        """
+        Import corporate actions for a list of tickers
+        
+        Args:
+            tickers: List of ticker symbols
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            Number of actions imported
+        """
+        self.logger.info(f"Importing corporate actions for {len(tickers)} tickers from {start_date} to {end_date}")
+        
+        if not tickers:
+            return 0
+            
+        try:
+            # Convert tickers to Bloomberg format (append " Equity")
+            bb_tickers = [f"{ticker} Equity" for ticker in tickers]
+            
+            # Get corporate actions from Bloomberg
+            actions_df = self.bloomberg.get_corporate_actions(bb_tickers, start_date, end_date)
+            
+            if actions_df.empty:
+                self.logger.info(f"No corporate actions found for the specified tickers in the date range")
+                return 0
+                
+            # Process and store actions
+            count = 0
+            for _, row in actions_df.iterrows():
+                # Extract ticker without " Equity" suffix
+                ticker = row.get('security', '').replace(' Equity', '')
+                
+                if not ticker:
+                    continue
+                    
+                # Map Bloomberg action type to our internal types
+                action_type = self._map_action_type(row.get('CORP_ACTION_TYPE', ''))
+                effective_date = row.get('CORP_ACTION_START_DT', None)
+                description = row.get('CORP_ACTION_DESC', '')
+                status = row.get('CORP_ACTION_STATUS', '')
+                
+                # Additional data in a JSON format
+                details = {
+                    'ratio': row.get('ratio', None),
+                    'factor': row.get('factor', None),
+                    'amount': row.get('amount', None),
+                    'status': status,
+                    'raw_type': row.get('CORP_ACTION_TYPE', '')
+                }
+                
+                # Store in database
+                if self.db.add_corporate_action(
+                    ticker=ticker,
+                    action_type=action_type,
+                    effective_date=effective_date,
+                    description=description,
+                    details=details
+                ):
+                    count += 1
+                    
+            self.logger.info(f"Imported {count} corporate actions")
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"Error importing corporate actions: {e}")
+            return 0
+            
+    def _map_action_type(self, bloomberg_action_type: str) -> str:
+        """Map Bloomberg action types to our internal types"""
+        action_map = {
+            'STOCK_SPLIT': 'SPLIT',
+            'SPIN_OFF': 'SPINOFF',
+            'NAME_CHANGE': 'NAME_CHANGE',
+            'TICKER_CHANGE': 'TICKER_CHANGE',
+            'ACQUISITION': 'ACQUISITION',
+            'MERGER': 'MERGER',
+            'DIVIDEND': 'DIVIDEND'
+        }
+        
+        return action_map.get(bloomberg_action_type.upper(), 'OTHER') 
