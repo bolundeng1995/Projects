@@ -237,8 +237,19 @@ class IndexDatabase:
             cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'adj_close']
             df = df[cols]
             
-            # Insert into database
-            df.to_sql('price_data', self.conn, if_exists='append', index=False)
+            # Instead of using to_sql which doesn't handle conflicts well
+            # Prepare the data in a format suitable for executemany
+            # Convert DataFrame to list of tuples
+            records = df.to_records(index=False)
+            data_tuples = list(records)
+            
+            # Use INSERT OR REPLACE to handle existing records
+            self.conn.executemany('''
+                INSERT OR REPLACE INTO price_data
+                (ticker, date, open, high, low, close, volume, adj_close)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', data_tuples)
+            
             self.conn.commit()
             return True
         except Exception as e:
@@ -331,7 +342,7 @@ class IndexDatabase:
                 INSERT INTO constituent_changes
                 (index_id, ticker, bloomberg_ticker, event_type, announcement_date, implementation_date,
                 old_weight, new_weight, reason, notes)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (index_id, ticker, bloomberg_ticker, event_type, announcement_date, implementation_date,
                 old_weight, new_weight, reason, notes))
             self.conn.commit()
