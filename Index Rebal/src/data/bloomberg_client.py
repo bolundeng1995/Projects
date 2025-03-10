@@ -677,9 +677,10 @@ class BloombergClient:
                                     
                                     changes.append(change)
             
+            # Move this check inside the while loop
             if event.eventType() == blpapi.Event.RESPONSE:
                 end_reached = True
-                
+            
             return pd.DataFrame(changes)
             
         except Exception as e:

@@ -1,11 +1,13 @@
 import pandas as pd
 from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
+import logging
 
 class IndexConstituentImporter:
     def __init__(self, database, bloomberg_client):
         self.db = database
         self.bloomberg = bloomberg_client
+        self.logger = logging.getLogger(__name__)
         self.providers = {
             'sp': SPConstituentProvider(bloomberg_client),
             'russell': RussellConstituentProvider(bloomberg_client),
