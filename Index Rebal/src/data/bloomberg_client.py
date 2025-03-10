@@ -371,277 +371,263 @@ class BloombergClient:
             self.logger.error(f"Error retrieving security info: {e}")
             return pd.DataFrame()
 
-    def get_corporate_actions(self, securities: List[str], 
-                             start_date: str, 
-                             end_date: str) -> pd.DataFrame:
+    def get_corporate_actions(self, securities: List[str], start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Get corporate actions for a list of securities
+        Get corporate actions for securities using xbbg
         
         Args:
             securities: List of Bloomberg security identifiers
-            start_date: Start date in format YYYY-MM-DD
-            end_date: End date in format YYYY-MM-DD
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
             
         Returns:
-            DataFrame with corporate action data
+            DataFrame containing corporate actions
         """
-        if not self.start_session():
-            return pd.DataFrame()
+        self.logger.info(f"Getting corporate actions for {len(securities)} securities")
         
         try:
-            # Get reference data service
-            refdata_service = self.session.getService("//blp/refdata")
+            import xbbg.blp as blp
+            from datetime import datetime
             
-            # Create request for corporate actions
-            request = refdata_service.createRequest("ReferenceDataRequest")
+            # Convert dates to Bloomberg format (YYYYMMDD)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%Y%m%d")
+            bloomberg_end_date = end_dt.strftime("%Y%m%d")
             
-            for security in securities:
-                request.append("securities", security)
+            all_actions = []
+            
+            # Process securities in batches to avoid overloading Bloomberg
+            batch_size = 10
+            for i in range(0, len(securities), batch_size):
+                batch = securities[i:i+batch_size]
                 
-            # Add fields for different corporate actions
-            request.append("fields", "CORP_ACTION_START_DT")
-            request.append("fields", "CORP_ACTION_TYPE")
-            request.append("fields", "CORP_ACTION_STATUS")
-            request.append("fields", "CORP_ACTION_DESC")
-            
-            # Set date range for corporate actions
-            overrides = request.getElement("overrides")
-            start_override = overrides.appendElement()
-            start_override.setElement("fieldId", "START_DT")
-            start_override.setElement("value", start_date)
-            
-            end_override = overrides.appendElement()
-            end_override.setElement("fieldId", "END_DT")
-            end_override.setElement("value", end_date)
-            
-            # Send the request
-            self.session.sendRequest(request)
-            
-            # Process the response
-            corporate_actions = []
-            end_reached = False
-            
-            while not end_reached:
-                event = self.session.nextEvent(500)
+                # Get corporate actions using CACS (Corporate Action Calendar)
+                result = blp.bdh(
+                    tickers=batch,
+                    flds=['CORP_ACTION_TYPE', 'EX_DT', 'DECLARED_DT', 'PAYABLE_DT', 'AMOUNT', 'CRNCY'],
+                    start_date=bloomberg_start_date,
+                    end_date=bloomberg_end_date
+                )
                 
-                for msg in event:
-                    if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        security_data_array = msg.getElement("securityData")
-                        
-                        for i in range(security_data_array.numValues()):
-                            security_data = security_data_array.getValue(i)
-                            ticker = security_data.getElementAsString("security")
-                            
-                            if security_data.hasElement("fieldData"):
-                                field_data = security_data.getElement("fieldData")
-                                
-                                if field_data.hasElement("CORP_ACTION_START_DT") and field_data.hasElement("CORP_ACTION_TYPE"):
-                                    action_date = field_data.getElementAsString("CORP_ACTION_START_DT")
-                                    action_type = field_data.getElementAsString("CORP_ACTION_TYPE")
-                                    action_status = field_data.getElementAsString("CORP_ACTION_STATUS") if field_data.hasElement("CORP_ACTION_STATUS") else ""
-                                    action_desc = field_data.getElementAsString("CORP_ACTION_DESC") if field_data.hasElement("CORP_ACTION_DESC") else ""
-                                    
-                                    corporate_actions.append({
-                                        "ticker": ticker,
-                                        "action_date": action_date,
-                                        "action_type": action_type,
-                                        "action_status": action_status,
-                                        "action_description": action_desc
-                                    })
+                if result is not None and not result.empty:
+                    # Process results
+                    df = result.reset_index()
                     
-            if event.eventType() == blpapi.Event.RESPONSE:
-                end_reached = True
+                    # Standardize column names
+                    if 'ticker' not in df.columns and 'security' in df.columns:
+                        df = df.rename(columns={'security': 'ticker'})
+                        
+                    # Add to our collection
+                    all_actions.append(df)
+                    
+                # For dividend-specific data, use DVD_HIST
+                div_result = blp.bds(
+                    tickers=batch,
+                    flds='DVD_HIST',
+                    DVD_START_DT=bloomberg_start_date,
+                    DVD_END_DT=bloomberg_end_date
+                )
                 
-            return pd.DataFrame(corporate_actions)
+                if div_result is not None and not div_result.empty:
+                    div_df = div_result.reset_index()
+                    div_df['action_type'] = 'DIV'
+                    all_actions.append(div_df)
+                
+            # Combine all results
+            if all_actions:
+                combined_df = pd.concat(all_actions, ignore_index=True)
+                return combined_df
+            else:
+                return pd.DataFrame()
             
+        except ImportError:
+            self.logger.error("xbbg package not installed. Install with 'pip install xbbg'")
+            return pd.DataFrame()
         except Exception as e:
             self.logger.error(f"Error retrieving corporate actions: {e}")
             return pd.DataFrame()
         
-    def get_mergers_acquisitions(self, start_date: str, end_date: str, 
-                               status: str = "ANNOUNCED") -> pd.DataFrame:
+    def get_ma_deals(self, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Get merger and acquisition data
+        Get M&A deals announced within a date range using xbbg
         
         Args:
-            start_date: Start date in format YYYY-MM-DD
-            end_date: End date in format YYYY-MM-DD
-            status: Status of M&A deals to retrieve (ANNOUNCED, COMPLETED, PENDING, etc.)
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
             
         Returns:
-            DataFrame with M&A data
+            DataFrame with M&A deals
         """
-        if not self.start_session():
-            return pd.DataFrame()
+        self.logger.info(f"Getting M&A deals from {start_date} to {end_date}")
         
         try:
-            # For M&A data, we use the EQS (Equity Screening) service
-            if not self.session.openService("//blp/exrsvc"):
-                self.logger.error("Failed to open EQS service")
+            import xbbg.blp as blp
+            from datetime import datetime
+            
+            # Convert dates to Bloomberg format (YYYYMMDD)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%Y%m%d")
+            bloomberg_end_date = end_dt.strftime("%Y%m%d")
+            
+            # Get M&A deals using MA_SEARCH
+            # Note: MA_SEARCH returns M&A deals announced in the specified period
+            result = blp.bsrch(
+                domain='MA',
+                query=f"ANNOUNCED_DT:[{bloomberg_start_date} TO {bloomberg_end_date}]"
+            )
+            
+            if result is None or result.empty:
                 return pd.DataFrame()
             
-            exrsvc = self.session.getService("//blp/exrsvc")
-            
-            # Create request for EQS
-            request = exrsvc.createRequest("BeqsRequest")
-            
-            # Set universe parameters (Public companies in given markets)
-            universe = request.getElement("universe")
-            universe.setElement("stringValue", "PRIVATE_ASSETS_GLOBAL")
-            
-            # Set screening criteria for M&A deals
-            screen = request.getElement("screeningCriteria")
-            
-            # Add filter for deal type
-            filter1 = screen.appendElement("filter")
-            filter1.setElement("name", "Deal Type")
-            filter1.setElement("value", "M&A")
-            
-            # Add filter for date range
-            filter2 = screen.appendElement("filter")
-            filter2.setElement("name", "Announcement Date")
-            filter2.setElement("greaterThanEq", start_date)
-            filter2.setElement("lessThanEq", end_date)
-            
-            # Add filter for status
-            filter3 = screen.appendElement("filter")
-            filter3.setElement("name", "Deal Status")
-            filter3.setElement("value", status)
-            
-            # Select fields to retrieve
-            fields = request.getElement("fields")
-            
-            # Deal details
-            fields.appendValue("DealStatus")
-            fields.appendValue("AnnouncementDate")
-            fields.appendValue("ExpectedCompletionDate")
-            fields.appendValue("DealValue")
-            fields.appendValue("DealValueCurrency")
-            
-            # Target info
-            fields.appendValue("TargetName")
-            fields.appendValue("TargetTicker")
-            fields.appendValue("TargetIndustry")
-            fields.appendValue("TargetCountry")
-            
-            # Acquirer info
-            fields.appendValue("AcquirerName")
-            fields.appendValue("AcquirerTicker")
-            fields.appendValue("AcquirerIndustry")
-            fields.appendValue("AcquirerCountry")
-            
-            # Send the request
-            self.session.sendRequest(request)
-            
-            # Process the response
+            # The result from bsrch is just a list of tickers
+            # We need to get details for each deal
             ma_deals = []
-            end_reached = False
             
-            while not end_reached:
-                event = self.session.nextEvent(500)
+            # Process in batches to avoid overloading Bloomberg
+            batch_size = 20
+            for i in range(0, len(result), batch_size):
+                batch = result[i:i+batch_size]
                 
-                for msg in event:
-                    if msg.messageType() == blpapi.Name("BeqsResponse"):
-                        if msg.hasElement("data"):
-                            data = msg.getElement("data")
-                            for i in range(data.numValues()):
-                                field_data = data.getValue(i)
-                                
-                                deal = {}
-                                for j in range(field_data.numElements()):
-                                    element = field_data.getElement(j)
-                                    name = element.name()
-                                    value = element.getValueAsString()
-                                    deal[name] = value
-                                    
-                                ma_deals.append(deal)
-                    
-                if event.eventType() == blpapi.Event.RESPONSE:
-                    end_reached = True
-                    
-            return pd.DataFrame(ma_deals)
+                # Get deal details
+                deal_data = blp.bdp(
+                    tickers=batch,
+                    flds=[
+                        'ID_BB_COMPANY', 'ANNOUNCED_DT', 'COMPLETED_DT',
+                        'TARGET_NAME', 'ACQUIRER_NAME', 'DEAL_VALUE',
+                        'DEAL_STATUS', 'DEAL_PAYMENT_TYPE', 'PCT_OWNED_AFTER'
+                    ]
+                )
+                
+                if deal_data is not None and not deal_data.empty:
+                    # Process and add to our collection
+                    deal_df = deal_data.reset_index()
+                    ma_deals.append(deal_df)
             
-        except Exception as e:
-            self.logger.error(f"Error retrieving M&A data: {e}")
+            # Combine all results
+            if ma_deals:
+                combined_df = pd.concat(ma_deals, ignore_index=True)
+                
+                # Rename columns
+                column_map = {
+                    'ticker': 'deal_id',
+                    'ID_BB_COMPANY': 'target_ticker',
+                    'ANNOUNCED_DT': 'announcement_date',
+                    'COMPLETED_DT': 'completion_date',
+                    'TARGET_NAME': 'target',
+                    'ACQUIRER_NAME': 'acquirer',
+                    'DEAL_VALUE': 'deal_value',
+                    'DEAL_STATUS': 'status',
+                    'DEAL_PAYMENT_TYPE': 'payment_type',
+                    'PCT_OWNED_AFTER': 'pct_owned_after'
+                }
+                
+                # Only rename columns that exist
+                rename_cols = {k: v for k, v in column_map.items() if k in combined_df.columns}
+                combined_df = combined_df.rename(columns=rename_cols)
+                
+                return combined_df
+            else:
+                return pd.DataFrame()
+            
+        except ImportError:
+            self.logger.error("xbbg package not installed. Install with 'pip install xbbg'")
             return pd.DataFrame()
-
+        except Exception as e:
+            self.logger.error(f"Error retrieving M&A deals: {e}")
+            return pd.DataFrame()
+        
     def get_ticker_changes(self, start_date: str, end_date: str) -> pd.DataFrame:
         """
-        Get ticker changes data
+        Get ticker symbol and name changes within a date range using xbbg
         
         Args:
-            start_date: Start date in format YYYY-MM-DD
-            end_date: End date in format YYYY-MM-DD
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
             
         Returns:
-            DataFrame with ticker change data
+            DataFrame with ticker and name changes
         """
-        if not self.start_session():
-            return pd.DataFrame()
+        self.logger.info(f"Getting ticker changes from {start_date} to {end_date}")
         
         try:
-            # Get reference data service
-            refdata_service = self.session.getService("//blp/refdata")
+            import xbbg.blp as blp
+            from datetime import datetime
             
-            # Create request for CHNG_TICKER_EXCH query
-            request = refdata_service.createRequest("BeqsRequest")
+            # Convert dates to Bloomberg format (YYYYMMDD)
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%Y%m%d")
+            bloomberg_end_date = end_dt.strftime("%Y%m%d")
             
-            # Set universe parameters
-            universe = request.getElement("universe")
-            universe.setElement("stringValue", "EQY_TICKER_CHANGES")
+            # Search for ticker changes using CHNG_TICKER_EXCH_CODE
+            # We need to use Bloomberg's BEQS (Equity Search) functionality
+            # This is a bit complex via xbbg so we'll simplify
             
-            # Set screening criteria for ticker changes
-            screen = request.getElement("screeningCriteria")
+            # Search for equities with name changes
+            result = blp.bsrch(
+                domain='EQ',
+                query=f"NAME_CHANGE_DT:[{bloomberg_start_date} TO {bloomberg_end_date}]"
+            )
             
-            # Add filter for date range
-            filter1 = screen.appendElement("filter")
-            filter1.setElement("name", "Change Date")
-            filter1.setElement("greaterThanEq", start_date)
-            filter1.setElement("lessThanEq", end_date)
+            if result is None or result.empty:
+                return pd.DataFrame()
             
-            # Select fields to retrieve
-            fields = request.getElement("fields")
-            fields.appendValue("Old Ticker")
-            fields.appendValue("New Ticker")
-            fields.appendValue("Old Name")
-            fields.appendValue("New Name")
-            fields.appendValue("Change Date")
-            fields.appendValue("Change Reason")
-            fields.appendValue("Security Type")
-            fields.appendValue("Country")
-            fields.appendValue("Exchange")
+            # Get details for each ticker
+            changes = []
             
-            # Send the request
-            self.session.sendRequest(request)
-            
-            # Process the response
-            ticker_changes = []
-            end_reached = False
-            
-            while not end_reached:
-                event = self.session.nextEvent(500)
+            # Process in batches
+            batch_size = 100  # Define batch_size
+            for i in range(0, len(result), batch_size):
+                batch = result[i:i+batch_size]
                 
-                for msg in event:
-                    if msg.messageType() == blpapi.Name("BeqsResponse"):
-                        if msg.hasElement("data"):
-                            data = msg.getElement("data")
-                            for i in range(data.numValues()):
-                                field_data = data.getValue(i)
-                                
-                                change = {}
-                                for j in range(field_data.numElements()):
-                                    element = field_data.getElement(j)
-                                    name = element.name()
-                                    value = element.getValueAsString()
-                                    change[name] = value
-                                    
-                                ticker_changes.append(change)
-                    
-                if event.eventType() == blpapi.Event.RESPONSE:
-                    end_reached = True
-                    
-            return pd.DataFrame(ticker_changes)
+                # Get change details
+                change_data = blp.bdp(
+                    tickers=batch,
+                    flds=[
+                        'NAME_CHANGE_DT', 'PREVIOUS_SHORT_NAME', 'SHORT_NAME',
+                        'PREVIOUS_TICKER', 'ID_BB_PRIM_SECURITY_FLAG', 
+                        'SECURITY_TYP', 'COUNTRY', 'EXCH_CODE'
+                    ]
+                )
+                
+                if change_data is not None and not change_data.empty:
+                    # Process and add to our collection
+                    change_df = change_data.reset_index()
+                    changes.append(change_df)
             
+            # Combine all results
+            if changes:
+                combined_df = pd.concat(changes, ignore_index=True)
+                
+                # Rename columns for easier use
+                column_map = {
+                    'ticker': 'new_ticker',
+                    'PREVIOUS_TICKER': 'old_ticker',
+                    'NAME_CHANGE_DT': 'change_date',
+                    'SHORT_NAME': 'new_name',
+                    'PREVIOUS_SHORT_NAME': 'old_name',
+                    'SECURITY_TYP': 'security_type',
+                    'COUNTRY': 'country',
+                    'EXCH_CODE': 'exchange'
+                }
+                
+                # Only rename columns that exist
+                rename_cols = {k: v for k, v in column_map.items() if k in combined_df.columns}
+                combined_df = combined_df.rename(columns=rename_cols)
+                
+                # Add a reason column if it doesn't exist
+                if 'change_reason' not in combined_df.columns:
+                    combined_df['change_reason'] = 'Name Change'
+                    
+                return combined_df
+            else:
+                return pd.DataFrame()
+            
+        except ImportError:
+            self.logger.error("xbbg package not installed. Install with 'pip install xbbg'")
+            return pd.DataFrame()
         except Exception as e:
             self.logger.error(f"Error retrieving ticker changes: {e}")
             return pd.DataFrame()
@@ -670,8 +656,8 @@ class BloombergClient:
             # Convert dates to Bloomberg format (YYYYMMDD)
             start_dt = datetime.strptime(start_date, "%Y-%m-%d")
             end_dt = datetime.strptime(end_date, "%Y-%m-%d")
-            bloomberg_start_date = start_dt.strftime("%Y%m%d")  # Format as YYYYMMDD
-            bloomberg_end_date = end_dt.strftime("%Y%m%d")      # Format as YYYYMMDD
+            bloomberg_start_date = start_dt.strftime("%Y%m%d")
+            bloomberg_end_date = end_dt.strftime("%Y%m%d")
             
             # Get index member weights at start date
             start_result = blp.bds(
