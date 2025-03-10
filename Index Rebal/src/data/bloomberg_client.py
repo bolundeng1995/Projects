@@ -189,32 +189,39 @@ class BloombergClient:
             
     def get_index_member_weights(self, index_ticker: str) -> pd.DataFrame:
         """
-        Get current members and their weights in an index
+        Get current constituents and their weights for an index
         
         Args:
-            index_ticker: Bloomberg index identifier (e.g., "SPX Index")
+            index_ticker: Bloomberg index ticker (e.g., "SPX Index")
             
         Returns:
-            DataFrame with member tickers and weights
+            DataFrame containing member tickers, names, and weights
         """
-        if not self.start_session():
-            return pd.DataFrame()
-            
+        self.logger.info(f"Getting member weights for {index_ticker}")
+        
         try:
+            # Initialize a session if needed
+            if not self.start_session():
+                return pd.DataFrame()
+            
             # Get reference data service
             refdata_service = self.session.getService("//blp/refdata")
             
-            # Create request for index members and weights
+            # Create request
             request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            # Set the security
             request.append("securities", index_ticker)
-            request.append("fields", "INDX_MWEIGHT_HIST")
+            
+            # Set the fields for index members and weights
+            request.append("fields", "INDX_MWEIGHT")
             request.append("fields", "INDX_MEMBERS")
             
-            # Send the request
+            # Send request
             self.session.sendRequest(request)
             
-            # Process the response
-            members_data = []
+            # Process response
+            members = []
             end_reached = False
             
             while not end_reached:
@@ -227,25 +234,73 @@ class BloombergClient:
                         if security_data.hasElement("fieldData"):
                             field_data = security_data.getElement("fieldData")
                             
-                            if field_data.hasElement("INDX_MWEIGHT_HIST"):
-                                weight_data = field_data.getElement("INDX_MWEIGHT_HIST")
+                            # Process member weights
+                            if field_data.hasElement("INDX_MWEIGHT"):
+                                member_weights = field_data.getElement("INDX_MWEIGHT")
                                 
-                                for i in range(weight_data.numValues()):
-                                    member_info = weight_data.getValue(i)
-                                    member = {
-                                        "ticker": member_info.getElementAsString("Index Member"),
-                                        "weight": member_info.getElementAsFloat("Percent Weight"),
-                                        "index": index_ticker
-                                    }
-                                    members_data.append(member)
-                        
+                                for i in range(member_weights.numValues()):
+                                    member_data = member_weights.getValue(i)
+                                    
+                                    # Get member ticker and weight
+                                    member = {}
+                                    
+                                    if member_data.hasElement("Member Ticker"):
+                                        member["member_ticker"] = member_data.getElementAsString("Member Ticker")
+                                    else:
+                                        continue  # Skip if no ticker
+                                        
+                                    if member_data.hasElement("Member Short Name"):
+                                        member["member_name"] = member_data.getElementAsString("Member Short Name")
+                                    else:
+                                        member["member_name"] = ""
+                                        
+                                    if member_data.hasElement("Percent Weight"):
+                                        member["weight"] = member_data.getElementAsFloat("Percent Weight")
+                                    else:
+                                        member["weight"] = 0.0
+                                        
+                                    members.append(member)
+                            
+                            # If INDX_MWEIGHT not available, try INDX_MEMBERS
+                            elif field_data.hasElement("INDX_MEMBERS"):
+                                member_list = field_data.getElement("INDX_MEMBERS")
+                                
+                                for i in range(member_list.numValues()):
+                                    member_ticker = member_list.getValue(i)
+                                    members.append({
+                                        "member_ticker": member_ticker,
+                                        "member_name": "",  # We don't have the name in this case
+                                        "weight": 0.0       # We don't have weights in this case
+                                    })
+                
                 if event.eventType() == blpapi.Event.RESPONSE:
                     end_reached = True
                     
-            return pd.DataFrame(members_data)
+            df = pd.DataFrame(members)
+            
+            # If we have a dataframe with weights but no names, try to get the names
+            if not df.empty and "member_ticker" in df.columns and df["member_name"].isna().all():
+                # Get security info for all members
+                member_tickers = [f"{ticker} Equity" for ticker in df["member_ticker"].unique()]
+                security_info = self.get_security_info(member_tickers, ["SECURITY_NAME"])
+                
+                # Create ticker to name mapping
+                name_map = {}
+                for _, row in security_info.iterrows():
+                    ticker = row["ticker"].replace(" Equity", "")
+                    name_map[ticker] = row.get("SECURITY_NAME", "")
+                    
+                # Update member names
+                df["member_name"] = df["member_ticker"].map(name_map)
+                
+            # Sort by weight descending
+            if not df.empty and "weight" in df.columns:
+                df = df.sort_values("weight", ascending=False)
+            
+            return df
             
         except Exception as e:
-            self.logger.error(f"Error retrieving index member weights: {e}")
+            self.logger.error(f"Error getting member weights for {index_ticker}: {e}")
             return pd.DataFrame()
     
     def get_security_info(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
