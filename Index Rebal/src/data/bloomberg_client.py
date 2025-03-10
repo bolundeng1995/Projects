@@ -678,11 +678,89 @@ class BloombergClient:
                                     changes.append(change)
             
             # Move this check inside the while loop
-            if event.eventType() == blpapi.Event.RESPONSE:
-                end_reached = True
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    end_reached = True
             
             return pd.DataFrame(changes)
             
         except Exception as e:
             self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
+            return pd.DataFrame()
+
+    def get_current_data(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
+        """
+        Get current market data for a list of securities
+        
+        Args:
+            securities: List of Bloomberg security identifiers
+            fields: List of Bloomberg field identifiers
+            
+        Returns:
+            DataFrame containing current market data
+        """
+        self.logger.info(f"Getting current market data for {len(securities)} securities")
+        
+        try:
+            # Initialize a session if needed
+            if not self.start_session():
+                return pd.DataFrame()
+            
+            # Get reference data service
+            refdata_service = self.session.getService("//blp/refdata")
+            
+            # Create request
+            request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            # Add securities to request
+            for security in securities:
+                request.append("securities", security)
+            
+            # Add fields to request
+            for field in fields:
+                request.append("fields", field)
+            
+            # Send request
+            self.session.sendRequest(request)
+            
+            # Process response
+            data = []
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
+                        security_data_array = msg.getElement("securityData")
+                        
+                        for i in range(security_data_array.numValues()):
+                            security_data = security_data_array.getValue(i)
+                            ticker = security_data.getElementAsString("security")
+                            
+                            if security_data.hasElement("fieldData"):
+                                field_data = security_data.getElement("fieldData")
+                                
+                                row = {"ticker": ticker}
+                                
+                                for field in fields:
+                                    if field_data.hasElement(field):
+                                        try:
+                                            value = field_data.getElementAsFloat(field)
+                                        except:
+                                            try:
+                                                value = field_data.getElementAsString(field)
+                                            except:
+                                                value = None
+                                                
+                                        row[field] = value
+                                        
+                                data.append(row)
+                            
+                if event.eventType() == blpapi.Event.RESPONSE:
+                    end_reached = True
+                    
+            return pd.DataFrame(data)
+            
+        except Exception as e:
+            self.logger.error(f"Error retrieving current market data: {e}")
             return pd.DataFrame() 
