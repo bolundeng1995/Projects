@@ -707,27 +707,12 @@ class BloombergClient:
                 
                 for msg in event:
                     if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                        # Check for response errors
-                        if msg.hasElement("responseError"):
-                            error_element = msg.getElement("responseError")
-                            error_msg = error_element.getElementAsString("message")
-                            self.logger.error(f"Bloomberg API error: {error_msg}")
-                            continue
-                        
-                        # Get the security data array
+                        # Process reference data
                         security_data_array = msg.getElement("securityData")
                         
-                        # Iterate through all securities in the response
                         for i in range(security_data_array.numValues()):
                             security_data = security_data_array.getValue(i)
                             
-                            # Check for security-level errors
-                            if security_data.hasElement("securityError"):
-                                error = security_data.getElement("securityError")
-                                self.logger.error(f"Security error for {index_ticker}: {error.getElementAsString('message')}")
-                                continue
-                            
-                            # Process field data
                             if security_data.hasElement("fieldData"):
                                 field_data = security_data.getElement("fieldData")
                                 
@@ -738,10 +723,44 @@ class BloombergClient:
                                     for j in range(weight_hist.numValues()):
                                         weight_data = weight_hist.getValue(j)
                                         
+                                        # Handle dates properly - they may come back in MM/DD/YYYY format
+                                        effective_date = None
+                                        announcement_date = None
+                                        
+                                        if weight_data.hasElement("Effective Date"):
+                                            date_str = weight_data.getElementAsString("Effective Date")
+                                            try:
+                                                # Try parsing as MM/DD/YYYY first
+                                                date_obj = datetime.strptime(date_str, "%m/%d/%Y")
+                                                effective_date = date_obj.strftime("%Y-%m-%d")
+                                            except ValueError:
+                                                # If that fails, try as YYYY-MM-DD
+                                                try:
+                                                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                                                    effective_date = date_str
+                                                except ValueError:
+                                                    # If all parsing fails, use raw string
+                                                    effective_date = date_str
+                                        
+                                        if weight_data.hasElement("Announcement Date"):
+                                            date_str = weight_data.getElementAsString("Announcement Date")
+                                            try:
+                                                # Try parsing as MM/DD/YYYY first
+                                                date_obj = datetime.strptime(date_str, "%m/%d/%Y")
+                                                announcement_date = date_obj.strftime("%Y-%m-%d")
+                                            except ValueError:
+                                                # If that fails, try as YYYY-MM-DD
+                                                try:
+                                                    date_obj = datetime.strptime(date_str, "%Y-%m-%d")
+                                                    announcement_date = date_str
+                                                except ValueError:
+                                                    # If all parsing fails, use raw string
+                                                    announcement_date = date_str
+                                        
                                         # Extract change data
                                         change = {
-                                            'effective_date': weight_data.getElementAsString("Effective Date") if weight_data.hasElement("Effective Date") else None,
-                                            'announcement_date': weight_data.getElementAsString("Announcement Date") if weight_data.hasElement("Announcement Date") else None,
+                                            'effective_date': effective_date,
+                                            'announcement_date': announcement_date,
                                             'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
                                             'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
                                             'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
@@ -751,16 +770,6 @@ class BloombergClient:
                                         }
                                         
                                         changes.append(change)
-                                else:
-                                    # Check for field-level errors
-                                    if security_data.hasElement("fieldExceptions"):
-                                        field_exceptions = security_data.getElement("fieldExceptions")
-                                        for j in range(field_exceptions.numValues()):
-                                            field_exception = field_exceptions.getValue(j)
-                                            field_id = field_exception.getElementAsString("fieldId")
-                                            error_info = field_exception.getElement("errorInfo")
-                                            error_message = error_info.getElementAsString("message")
-                                            self.logger.error(f"Field error for {index_ticker} field {field_id}: {error_message}")
             
             if event.eventType() == blpapi.Event.RESPONSE:
                 end_reached = True
