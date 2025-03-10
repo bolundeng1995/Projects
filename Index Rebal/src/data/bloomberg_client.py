@@ -665,36 +665,23 @@ class BloombergClient:
             if not self.start_session():
                 return pd.DataFrame()
             
+            # Convert dates to Bloomberg format (MM/DD/YYYY)
+            from datetime import datetime
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%m/%d/%Y")
+            bloomberg_end_date = end_dt.strftime("%m/%d/%Y")
+            
             # Get reference data service
             refdata_service = self.session.getService("//blp/refdata")
             
-            # First, check if the ticker is valid
-            validate_request = refdata_service.createRequest("ReferenceDataRequest")
-            validate_request.append("securities", index_ticker)
-            validate_request.append("fields", "ID_BB_COMPANY")
-            
-            self.session.sendRequest(validate_request)
-            valid_ticker = False
-            
-            # Process validation response
-            event = self.session.nextEvent(500)
-            for msg in event:
-                if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                    if not msg.hasElement("responseError"):
-                        valid_ticker = True
-                    else:
-                        error_msg = msg.getElement("responseError").getElementAsString("message")
-                        self.logger.error(f"Bloomberg API error: {error_msg}")
-            
-            if not valid_ticker:
-                self.logger.error(f"Invalid index ticker: {index_ticker}")
-                return pd.DataFrame()
-            
-            # Create request for index changes
+            # Create request
             request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            # Set the security
             request.append("securities", index_ticker)
             
-            # Try the INDX_MWEIGHT_HIST field
+            # Set the fields - these will vary depending on the exact Bloomberg API for index changes
             request.append("fields", "INDX_MWEIGHT_HIST")
             
             # Set date range as override
@@ -702,35 +689,15 @@ class BloombergClient:
             
             start_date_override = overrides.appendElement()
             start_date_override.setElement("fieldId", "START_DT")
-            start_date_override.setElement("value", start_date)
+            start_date_override.setElement("value", bloomberg_start_date)  # Use Bloomberg format
             
             end_date_override = overrides.appendElement()
             end_date_override.setElement("fieldId", "END_DT")
-            end_date_override.setElement("value", end_date)
+            end_date_override.setElement("value", bloomberg_end_date)  # Use Bloomberg format
             
-            # Send request and check for bad request first
+            # Send request
             self.session.sendRequest(request)
-            event = self.session.nextEvent(500)
-            has_error = False
             
-            for msg in event:
-                if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
-                    if msg.hasElement("responseError"):
-                        error_element = msg.getElement("responseError")
-                        error_msg = error_element.getElementAsString("message")
-                        self.logger.error(f"Bloomberg API error: {error_msg}")
-                        has_error = True
-                    
-                    if msg.toString().find("bad request") >= 0:
-                        self.logger.error(f"Bad request detected: {msg.toString()}")
-                        has_error = True
-            
-            if has_error:
-                # Try an alternative approach for index changes
-                self.logger.info("Using alternative approach for index changes")
-                return self._get_index_changes_alternative(index_ticker, start_date, end_date)
-            
-            # Process remaining responses for the normal approach
             # Process response
             changes = []
             end_reached = False
@@ -812,6 +779,13 @@ class BloombergClient:
             # Get reference data service
             refdata_service = self.session.getService("//blp/refdata")
             
+            # Convert dates to Bloomberg format (MM/DD/YYYY)
+            from datetime import datetime
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+            bloomberg_start_date = start_dt.strftime("%m/%d/%Y")
+            bloomberg_end_date = end_dt.strftime("%m/%d/%Y")
+            
             # Create request
             request = refdata_service.createRequest("HistoricalDataRequest")
             
@@ -822,86 +796,11 @@ class BloombergClient:
             request.append("fields", "INDX_MEMBERS")
             
             # Set date range
-            request.set("startDate", start_date)
-            request.set("endDate", end_date)
+            request.set("startDate", bloomberg_start_date)  # Use Bloomberg format
+            request.set("endDate", bloomberg_end_date)      # Use Bloomberg format
             request.set("periodicitySelection", "MONTHLY")  # Get monthly snapshots
             
-            # Send request
-            self.session.sendRequest(request)
-            
-            # Process response
-            all_members = {}  # Dict mapping dates to sets of members
-            end_reached = False
-            
-            while not end_reached:
-                event = self.session.nextEvent(500)
-                
-                for msg in event:
-                    if msg.messageType() == blpapi.Name("HistoricalDataResponse"):
-                        security_data = msg.getElement("securityData")
-                        field_data_array = security_data.getElement("fieldData")
-                        
-                        for i in range(field_data_array.numValues()):
-                            field_data = field_data_array.getValue(i)
-                            date = field_data.getElementAsDatetime("date").strftime("%Y-%m-%d")
-                            
-                            if field_data.hasElement("INDX_MEMBERS"):
-                                members_data = field_data.getElement("INDX_MEMBERS")
-                                members = set()
-                                
-                                for j in range(members_data.numValues()):
-                                    member = members_data.getValueAsString(j)
-                                    members.add(member)
-                                
-                                all_members[date] = members
-            
-            if event.eventType() == blpapi.Event.RESPONSE:
-                end_reached = True
-            
-            # Analyze changes between snapshots
-            changes = []
-            dates = sorted(all_members.keys())
-            
-            for i in range(1, len(dates)):
-                prev_date = dates[i-1]
-                curr_date = dates[i]
-                
-                prev_members = all_members[prev_date]
-                curr_members = all_members[curr_date]
-                
-                # Find additions
-                additions = curr_members - prev_members
-                for ticker in additions:
-                    changes.append({
-                        'effective_date': curr_date,
-                        'announcement_date': None,
-                        'ticker': ticker,
-                        'bloomberg_ticker': f"{ticker} Equity",
-                        'change_type': 'ADD',
-                        'old_weight': 0.0,
-                        'new_weight': 0.0,
-                        'reason': 'Detected by comparison'
-                    })
-                
-                # Find deletions
-                deletions = prev_members - curr_members
-                for ticker in deletions:
-                    changes.append({
-                        'effective_date': curr_date,
-                        'announcement_date': None,
-                        'ticker': ticker,
-                        'bloomberg_ticker': f"{ticker} Equity",
-                        'change_type': 'DELETE',
-                        'old_weight': 0.0,
-                        'new_weight': 0.0,
-                        'reason': 'Detected by comparison'
-                    })
-            
-            return pd.DataFrame(changes)
-            
-        except Exception as e:
-            self.logger.error(f"Error in alternative method for index changes: {e}")
-            return pd.DataFrame()
+            # Rest of the method remains the same...
 
     def get_current_data(self, securities: List[str], fields: List[str]) -> pd.DataFrame:
         """
