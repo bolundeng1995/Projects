@@ -210,23 +210,29 @@ class IndexDatabase:
                 self.logger.error(f"Missing required price columns for {ticker}: {missing_columns}")
                 return False
                 
-            # Reset index if it's a DatetimeIndex and ensure it's named 'date'
-            if isinstance(df.index, pd.DatetimeIndex):
+            # Check for datetime index and handle properly
+            if df.index.name == 'date' or df.index.name == 'Date':
+                # Explicitly convert index to DatetimeIndex
+                df.index = pd.DatetimeIndex(df.index)
+                df = df.reset_index()
+            elif isinstance(df.index, pd.DatetimeIndex):
                 df = df.reset_index()
                 df.rename(columns={'index': 'date'}, inplace=True)
-                
-            # Ensure date column exists
-            if 'date' not in df.columns:
-                self.logger.error(f"No date column in price data for {ticker}")
-                return False
+            else:
+                # If index is not a DatetimeIndex, ensure there's a date column
+                if 'date' not in df.columns:
+                    self.logger.error(f"No date column in price data for {ticker}")
+                    return False
+            
+            # Ensure date is properly formatted
+            df['date'] = pd.to_datetime(df['date'])
                 
             # Add ticker column
             df['ticker'] = ticker
             
-            # Convert date to string format if it's not already
-            if not isinstance(df['date'].iloc[0], str):
-                df['date'] = df['date'].astype(str)
-                
+            # Convert date to string format for SQLite storage
+            df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+            
             # Select only the required columns
             cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'adj_close']
             df = df[cols]
