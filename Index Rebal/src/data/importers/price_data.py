@@ -166,4 +166,63 @@ class PriceDataImporter:
                 self.logger.info(f"Updated prices for index: {index_id}")
                 
         except Exception as e:
-            self.logger.error(f"Error updating index prices: {e}") 
+            self.logger.error(f"Error updating index prices: {e}")
+    
+    def update_constituent_prices(self, ticker: str, lookback_days: int = 365):
+        """
+        Update price data for a specific constituent
+        
+        Args:
+            ticker: Stock ticker symbol
+            lookback_days: Number of days to fetch price history for
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        self.logger.info(f"Updating price data for {ticker}")
+        
+        # Calculate date range
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=lookback_days)
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        try:
+            # Get price data from Bloomberg
+            fields = ['PX_OPEN', 'PX_HIGH', 'PX_LOW', 'PX_LAST', 'PX_VOLUME']
+            equity_ticker = f"{ticker} Equity"  # Convert to Bloomberg equity format
+            
+            price_data = self.bloomberg.get_historical_data(
+                securities=[equity_ticker],
+                fields=fields,
+                start_date=start_date_str,
+                end_date=end_date_str
+            )
+            
+            if not price_data or equity_ticker not in price_data:
+                self.logger.warning(f"No price data returned for {ticker}")
+                return False
+                
+            # Get the data frame for this ticker
+            df = price_data[equity_ticker].copy()
+            
+            # Rename columns to match database schema
+            column_map = {
+                'PX_OPEN': 'open',
+                'PX_HIGH': 'high',
+                'PX_LOW': 'low',
+                'PX_LAST': 'close',
+                'PX_VOLUME': 'volume'
+            }
+            
+            df.rename(columns=column_map, inplace=True)
+            
+            # Add adj_close (use close since Bloomberg data is adjusted)
+            df['adj_close'] = df['close']
+            
+            # Store in database
+            return self.db.add_price_data(ticker, df)
+            
+        except Exception as e:
+            self.logger.error(f"Error updating price data for {ticker}: {e}")
+            return False 

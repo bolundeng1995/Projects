@@ -1,5 +1,6 @@
 import pandas as pd
 from typing import List, Dict, Any, Optional
+from datetime import datetime, timedelta
 
 class IndexConstituentImporter:
     def __init__(self, database, bloomberg_client):
@@ -43,6 +44,101 @@ class IndexConstituentImporter:
             return 'nasdaq'
         else:
             raise ValueError(f"Unknown index provider for {index_id}")
+
+    def import_historical_changes(self, index_id: str, lookback_days: int = 365):
+        """
+        Import historical constituent changes for an index
+        
+        Args:
+            index_id: Index identifier
+            lookback_days: Number of days to look back for changes
+            
+        Returns:
+            Number of changes imported
+        """
+        self.logger.info(f"Importing historical constituent changes for {index_id}")
+        
+        # Get index metadata
+        indices = self.db.get_all_indices()
+        index_row = indices[indices['index_id'] == index_id]
+        
+        if index_row.empty:
+            self.logger.error(f"Index {index_id} not found in database")
+            return 0
+            
+        bloomberg_ticker = index_row.iloc[0]['bloomberg_ticker']
+        
+        # Calculate date range
+        end_date = datetime.now().date()
+        start_date = end_date - timedelta(days=lookback_days)
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        try:
+            # Get historical changes from Bloomberg
+            # Note: This is a placeholder - actual implementation would depend on the
+            # specific Bloomberg API endpoint to retrieve historical changes
+            changes = self.bloomberg.get_index_changes(
+                index_ticker=bloomberg_ticker,
+                start_date=start_date_str,
+                end_date=end_date_str
+            )
+            
+            if changes.empty:
+                self.logger.info(f"No historical changes found for {index_id} in the specified period")
+                return 0
+                
+            # Process and store changes
+            count = 0
+            for _, row in changes.iterrows():
+                # Map Bloomberg data to our schema
+                event_type = self._map_event_type(row.get('change_type', ''))
+                ticker = row.get('ticker', '')
+                bloomberg_ticker = row.get('bloomberg_ticker', '')
+                
+                if not ticker or not event_type:
+                    continue
+                    
+                announcement_date = row.get('announcement_date', None)
+                implementation_date = row.get('effective_date', None)
+                old_weight = row.get('old_weight', 0.0)
+                new_weight = row.get('new_weight', 0.0)
+                reason = row.get('reason', '')
+                
+                # Store in database
+                if self.db.add_constituent_change(
+                    index_id=index_id,
+                    ticker=ticker,
+                    bloomberg_ticker=bloomberg_ticker,
+                    event_type=event_type,
+                    announcement_date=announcement_date,
+                    implementation_date=implementation_date,
+                    old_weight=old_weight,
+                    new_weight=new_weight,
+                    reason=reason
+                ):
+                    count += 1
+                    
+            self.logger.info(f"Imported {count} historical changes for {index_id}")
+            return count
+            
+        except Exception as e:
+            self.logger.error(f"Error importing historical changes for {index_id}: {e}")
+            return 0
+        
+    def _map_event_type(self, bloomberg_event_type: str) -> str:
+        """Map Bloomberg event types to our internal types"""
+        event_map = {
+            'ADD': 'ADD',
+            'DELETE': 'DELETE',
+            'ADDITION': 'ADD',
+            'DELETION': 'DELETE',
+            'REMOVAL': 'DELETE',
+            'WEIGHT_INCREASE': 'WEIGHT_CHANGE',
+            'WEIGHT_DECREASE': 'WEIGHT_CHANGE'
+        }
+        
+        return event_map.get(bloomberg_event_type.upper(), 'OTHER')
 
 class SPConstituentProvider:
     def __init__(self, bloomberg_client):

@@ -113,7 +113,7 @@ class BloombergClient:
                         data_list = []
                         for i in range(field_data.numValues()):
                             field_values = field_data.getValue(i)
-                            data_point = {"date": field_values.getElementAsDatetime("date").date()}
+                            data_point = {"date": field_values.getElementAsDatetime("date")}
                             
                             for field in fields:
                                 if field_values.hasElement(field):
@@ -594,4 +594,94 @@ class BloombergClient:
             
         except Exception as e:
             self.logger.error(f"Error retrieving ticker changes: {e}")
+            return pd.DataFrame()
+
+    def get_index_changes(self, index_ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        Get historical index constituent changes
+        
+        Args:
+            index_ticker: Bloomberg index ticker (e.g., "SPX Index")
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+            
+        Returns:
+            DataFrame containing index changes
+        """
+        self.logger.info(f"Getting index changes for {index_ticker} from {start_date} to {end_date}")
+        
+        try:
+            # Initialize a session if needed
+            if not self.start_session():
+                return pd.DataFrame()
+            
+            # Get reference data service
+            refdata_service = self.session.getService("//blp/refdata")
+            
+            # Create request
+            request = refdata_service.createRequest("ReferenceDataRequest")
+            
+            # Set the security
+            request.append("securities", index_ticker)
+            
+            # Set the fields - these will vary depending on the exact Bloomberg API for index changes
+            request.append("fields", "INDX_MWEIGHT_HIST")
+            
+            # Set date range as override
+            overrides = request.getElement("overrides")
+            
+            start_date_override = overrides.appendElement()
+            start_date_override.setElement("fieldId", "START_DT")
+            start_date_override.setElement("value", start_date)
+            
+            end_date_override = overrides.appendElement()
+            end_date_override.setElement("fieldId", "END_DT")
+            end_date_override.setElement("value", end_date)
+            
+            # Send request
+            self.session.sendRequest(request)
+            
+            # Process response
+            changes = []
+            end_reached = False
+            
+            while not end_reached:
+                event = self.session.nextEvent(500)
+                
+                for msg in event:
+                    if msg.messageType() == blpapi.Name("ReferenceDataResponse"):
+                        # Process reference data
+                        security_data = msg.getElement("securityData")
+                        
+                        if security_data.hasElement("fieldData"):
+                            field_data = security_data.getElement("fieldData")
+                            
+                            if field_data.hasElement("INDX_MWEIGHT_HIST"):
+                                weight_hist = field_data.getElement("INDX_MWEIGHT_HIST")
+                                
+                                # Process historical weights
+                                for i in range(weight_hist.numValues()):
+                                    weight_data = weight_hist.getValue(i)
+                                    
+                                    # Extract change data
+                                    change = {
+                                        'effective_date': weight_data.getElementAsString("Effective Date") if weight_data.hasElement("Effective Date") else None,
+                                        'announcement_date': weight_data.getElementAsString("Announcement Date") if weight_data.hasElement("Announcement Date") else None,
+                                        'ticker': weight_data.getElementAsString("Ticker") if weight_data.hasElement("Ticker") else None,
+                                        'bloomberg_ticker': weight_data.getElementAsString("ID_BB_SEC") if weight_data.hasElement("ID_BB_SEC") else None,
+                                        'change_type': weight_data.getElementAsString("Type") if weight_data.hasElement("Type") else None,
+                                        'old_weight': weight_data.getElementAsFloat("Old Weight") if weight_data.hasElement("Old Weight") else 0.0,
+                                        'new_weight': weight_data.getElementAsFloat("New Weight") if weight_data.hasElement("New Weight") else 0.0,
+                                        'reason': weight_data.getElementAsString("Reason") if weight_data.hasElement("Reason") else None
+                                    }
+                                    
+                                    changes.append(change)
+            
+            if event.eventType() == blpapi.Event.RESPONSE:
+                end_reached = True
+                
+            return pd.DataFrame(changes)
+            
+        except Exception as e:
+            self.logger.error(f"Error getting index changes for {index_ticker}: {e}")
             return pd.DataFrame() 
