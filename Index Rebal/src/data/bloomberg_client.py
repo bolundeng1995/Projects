@@ -663,6 +663,9 @@ class BloombergClient:
         try:
             import xbbg.blp as blp
             
+            # Import our mappings
+            from data.config.bloomberg_mappings import INDEX_CONSTITUENT_FIELDS
+            
             # Get index member weights at start date
             start_result = blp.bds(
                 tickers=index_ticker,
@@ -682,36 +685,43 @@ class BloombergClient:
                 self.logger.warning(f"No index data found for {index_ticker} on the specified dates")
                 return pd.DataFrame()
             
-            # Process start date members
+            # Process start date members with standardized column names
             start_members = {}
             if start_result is not None and not start_result.empty:
-                start_df = start_result.reset_index()
+                # Reset index and standardize column names
+                start_df = start_result.reset_index().rename(columns=INDEX_CONSTITUENT_FIELDS)
+                
+                # Extract ticker and weight info
                 for _, row in start_df.iterrows():
-                    ticker = row.get('Ticker', None)
+                    ticker = row.get('ticker', None)
                     if ticker:
                         start_members[ticker] = {
-                            'weight': float(row.get('Weight', 0.0)) if pd.notna(row.get('Weight', 0.0)) else 0.0,
-                            'name': row.get('Name', '')
+                            'weight': float(row.get('weight', 0.0)) if pd.notna(row.get('weight', 0.0)) else 0.0,
+                            'name': row.get('name', '')
                         }
-            
-            # Process end date members
+                    
+            # Process end date members with standardized column names
             end_members = {}
             if end_result is not None and not end_result.empty:
-                end_df = end_result.reset_index()
+                # Reset index and standardize column names
+                end_df = end_result.reset_index().rename(columns=INDEX_CONSTITUENT_FIELDS)
+                
+                # Extract ticker and weight info
                 for _, row in end_df.iterrows():
-                    ticker = row.get('Ticker', None)
+                    ticker = row.get('ticker', None)
                     if ticker:
                         end_members[ticker] = {
-                            'weight': float(row.get('Weight', 0.0)) if pd.notna(row.get('Weight', 0.0)) else 0.0,
-                            'name': row.get('Name', '')
+                            'weight': float(row.get('weight', 0.0)) if pd.notna(row.get('weight', 0.0)) else 0.0,
+                            'name': row.get('name', '')
                         }
             
             # Calculate changes
             changes = []
             
-            # Find additions (tickers in end_members but not in start_members)
+            # Find additions, deletions, and weight changes
             for ticker in end_members:
                 if ticker not in start_members:
+                    # Addition
                     changes.append({
                         'effective_date': end_date,
                         'announcement_date': None,
@@ -723,10 +733,10 @@ class BloombergClient:
                         'reason': 'Index addition'
                     })
                 else:
-                    # Weight changes (tickers in both, but with different weights)
+                    # Weight change
                     old_weight = start_members[ticker]['weight']
                     new_weight = end_members[ticker]['weight']
-                    if abs(new_weight - old_weight) > 0.001:  # Consider small changes as noise
+                    if abs(new_weight - old_weight) > 0.001:
                         changes.append({
                             'effective_date': end_date,
                             'announcement_date': None,
@@ -738,7 +748,7 @@ class BloombergClient:
                             'reason': 'Weight change'
                         })
             
-            # Find deletions (tickers in start_members but not in end_members)
+            # Find deletions
             for ticker in start_members:
                 if ticker not in end_members:
                     changes.append({
