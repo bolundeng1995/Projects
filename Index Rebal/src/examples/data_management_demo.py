@@ -45,7 +45,7 @@ def initialize_database(db_path='index_rebalance.db'):
                 description='Small-cap US equities')
     
     # Nasdaq indices
-    db.add_index('NDX', 'Nasdaq 100', 'NDX Index', 'Quarterly',
+    db.add_index('NASDAQ', 'Nasdaq 100', 'NDX Index', 'Quarterly',
                 description='Large-cap tech-focused equities')
     
     logger.info("Database initialized with indices")
@@ -85,8 +85,11 @@ def main():
         logger.info("Importing 1 year of historical price data...")
         lookback_days = 365
         
-        # Import price data for indices
-        price_importer.update_index_prices(lookback_days=lookback_days)
+        # Extract index IDs from the database
+        index_ids = indices['index_id'].tolist()
+        
+        # Update prices for these indices
+        price_importer.update_index_prices(index_ids, lookback_days=lookback_days)
         
         # Import price data for all constituents
         price_importer.update_all_constituent_prices(lookback_days=lookback_days)
