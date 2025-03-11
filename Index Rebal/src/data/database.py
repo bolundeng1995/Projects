@@ -32,7 +32,23 @@ class IndexDatabase:
         )
         ''')
         
-        # Create constituents table
+        # Create current constituents table (for latest data)
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS current_constituents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            bloomberg_ticker TEXT NOT NULL,
+            company_name TEXT,
+            weight REAL,
+            sector TEXT,
+            as_of_date TEXT NOT NULL,
+            UNIQUE(index_id, ticker),
+            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        )
+        ''')
+        
+        # Create historical constituents table (for tracking over time)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS constituents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -146,7 +162,14 @@ class IndexDatabase:
             sector = data.get('sector', '')
             as_of_date = data.get('as_of_date', datetime.now().strftime('%Y-%m-%d'))
             
-            # Insert or replace constituent
+            # Insert or replace in current_constituents table (latest data)
+            self.cursor.execute('''
+            INSERT OR REPLACE INTO current_constituents
+            (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date))
+            
+            # Also record in historical constituents table
             self.cursor.execute('''
             INSERT OR REPLACE INTO constituents
             (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date)
@@ -156,7 +179,7 @@ class IndexDatabase:
             self.conn.commit()
             return True
         except Exception as e:
-            logging.error(f"Error adding constituent: {e}")
+            self.logger.error(f"Error adding constituent: {e}")
             return False
         
     def remove_constituent(self, index_id: str, ticker: str):
