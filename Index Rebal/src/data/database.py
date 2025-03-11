@@ -5,132 +5,157 @@ import logging
 from datetime import datetime
 
 class IndexDatabase:
-    def __init__(self, db_path: str):
-        self.conn = sqlite3.connect(db_path)
-        self.logger = logging.getLogger(__name__)
-        self._initialize_tables()
+    """
+    SQLite database for storing index constituent data and related information
+    """
     
-    def _initialize_tables(self):
-        """Create necessary tables if they don't exist"""
-        # Tables for constituents, historical changes, corporate actions, etc.
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS index_metadata (
-                index_id TEXT PRIMARY KEY,
-                index_name TEXT,
-                bloomberg_ticker TEXT,
-                rebalance_frequency TEXT,
-                description TEXT,
-                last_updated DATE
-            )
+    def __init__(self, db_path: str = 'index_data.db'):
+        """Initialize the database connection and create tables if needed"""
+        self.db_path = db_path
+        self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+        self.cursor = self.conn.cursor()
+        self._create_tables()
+        
+    def _create_tables(self):
+        """Create tables if they don't exist"""
+        # Create index metadata table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS index_metadata (
+            index_id TEXT PRIMARY KEY,
+            index_name TEXT NOT NULL,
+            bloomberg_ticker TEXT NOT NULL,
+            rebalance_frequency TEXT,
+            description TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
         ''')
         
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS current_constituents (
-                index_id TEXT,
-                ticker TEXT,
-                bloomberg_ticker TEXT,
-                company_name TEXT,
-                weight REAL,
-                sector TEXT,
-                industry TEXT,
-                market_cap REAL,
-                last_updated DATE,
-                PRIMARY KEY (index_id, ticker)
-            )
+        # Create constituents table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS constituents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            bloomberg_ticker TEXT NOT NULL,
+            company_name TEXT,
+            weight REAL,
+            sector TEXT,
+            as_of_date TEXT NOT NULL,
+            UNIQUE(index_id, ticker, as_of_date),
+            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        )
         ''')
         
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS constituent_changes (
-                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                index_id TEXT,
-                ticker TEXT,
-                bloomberg_ticker TEXT,
-                event_type TEXT,
-                announcement_date DATE,
-                implementation_date DATE,
-                old_weight REAL,
-                new_weight REAL,
-                reason TEXT,
-                notes TEXT
-            )
+        # Create price data table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS price_data (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT NOT NULL,
+            date TEXT NOT NULL,
+            open REAL,
+            high REAL,
+            low REAL,
+            close REAL,
+            volume INTEGER,
+            UNIQUE(ticker, date)
+        )
         ''')
         
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS price_data (
-                ticker TEXT,
-                date DATE,
-                open REAL,
-                high REAL,
-                low REAL,
-                close REAL,
-                volume REAL,
-                adj_close REAL,
-                PRIMARY KEY (ticker, date)
-            )
+        # Create constituent change events table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS constituent_changes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_id TEXT NOT NULL,
+            ticker TEXT NOT NULL,
+            bloomberg_ticker TEXT NOT NULL,
+            event_type TEXT NOT NULL,  -- ADD, DELETE, WEIGHT_CHANGE
+            announcement_date TEXT,
+            implementation_date TEXT,
+            detection_date TEXT,
+            old_weight REAL,
+            new_weight REAL,
+            reason TEXT,
+            UNIQUE(index_id, ticker, event_type, implementation_date),
+            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        )
         ''')
         
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS rebalance_events (
-                event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                index_id TEXT,
-                event_type TEXT,
-                announcement_date DATE,
-                implementation_date DATE,
-                description TEXT,
-                status TEXT,
-                notes TEXT
-            )
+        # Create rebalance calendar table
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS rebalance_calendar (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            announcement_date TEXT,
+            implementation_date TEXT NOT NULL,
+            description TEXT,
+            UNIQUE(index_id, event_type, implementation_date),
+            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        )
         ''')
         
-        self.conn.execute('''
-            CREATE TABLE IF NOT EXISTS corporate_actions (
-                action_id INTEGER PRIMARY KEY AUTOINCREMENT,
-                ticker TEXT,
-                bloomberg_ticker TEXT,
-                action_type TEXT,
-                ex_date DATE,
-                effective_date DATE,
-                description TEXT,
-                details TEXT
-            )
-        ''')
+        self.conn.commit()
         
-    def add_index(self, index_id: str, index_name: str, bloomberg_ticker: str,
-                rebalance_frequency: str, description: str = ""):
-        """Add or update an index in the metadata table"""
+    def add_index(self, index_id: str, index_name: str, bloomberg_ticker: str, 
+                  rebalance_frequency: str = None, description: str = None) -> bool:
+        """
+        Add or update an index in the database
+        
+        Args:
+            index_id: Unique identifier for the index
+            index_name: Human-readable name
+            bloomberg_ticker: Bloomberg ticker symbol (e.g., "SPX Index")
+            rebalance_frequency: How often the index rebalances
+            description: Additional information about the index
+            
+        Returns:
+            True if successful, False otherwise
+        """
         try:
-            self.conn.execute('''
-                INSERT OR REPLACE INTO index_metadata
-                (index_id, index_name, bloomberg_ticker, rebalance_frequency, description, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (index_id, index_name, bloomberg_ticker, rebalance_frequency, description, datetime.now().date()))
+            self.cursor.execute('''
+            INSERT OR REPLACE INTO index_metadata 
+            (index_id, index_name, bloomberg_ticker, rebalance_frequency, description)
+            VALUES (?, ?, ?, ?, ?)
+            ''', (index_id, index_name, bloomberg_ticker, rebalance_frequency, description))
+            
             self.conn.commit()
             return True
         except Exception as e:
-            self.logger.error(f"Error adding index {index_id}: {e}")
-            self.conn.rollback()
+            logging.error(f"Error adding index: {e}")
             return False
+            
+    def add_constituent(self, index_id: str, ticker: str, bloomberg_ticker: str, data: Dict) -> bool:
+        """
+        Add or update a constituent for an index
         
-    def add_constituent(self, index_id: str, ticker: str, bloomberg_ticker: str, data: Dict[str, Any]):
-        """Add a constituent to an index"""
+        Args:
+            index_id: Index identifier
+            ticker: Constituent ticker symbol
+            bloomberg_ticker: Bloomberg ticker for the constituent
+            data: Dictionary with constituent data
+            
+        Returns:
+            True if successful, False otherwise
+        """
         try:
+            # Extract data fields
             company_name = data.get('company_name', '')
             weight = data.get('weight', 0.0)
             sector = data.get('sector', '')
-            industry = data.get('industry', '')
-            market_cap = data.get('market_cap', 0.0)
-            last_updated = data.get('last_updated', datetime.now().date())
+            as_of_date = data.get('as_of_date', datetime.now().strftime('%Y-%m-%d'))
             
-            self.conn.execute('''
-                INSERT OR REPLACE INTO current_constituents
-                (index_id, ticker, bloomberg_ticker, company_name, weight, sector, industry, market_cap, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, industry, market_cap, last_updated))
+            # Insert or replace constituent
+            self.cursor.execute('''
+            INSERT OR REPLACE INTO constituents
+            (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date))
+            
             self.conn.commit()
             return True
         except Exception as e:
-            self.logger.error(f"Error adding constituent {ticker} to {index_id}: {e}")
-            self.conn.rollback()
+            logging.error(f"Error adding constituent: {e}")
             return False
         
     def remove_constituent(self, index_id: str, ticker: str):

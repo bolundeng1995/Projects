@@ -26,10 +26,11 @@ class BaseConstituentProvider:
             self.logger.warning(f"No constituents found for {index_ticker}")
             return pd.DataFrame()
             
-        # Add Bloomberg tickers
-        constituents['bloomberg_ticker'] = constituents['member_ticker'].apply(
-            lambda x: f"{x} Equity" if not pd.isna(x) else None
-        )
+        # Add Bloomberg tickers if not present
+        if 'bloomberg_ticker' not in constituents.columns:
+            constituents['bloomberg_ticker'] = constituents['member_ticker'].apply(
+                lambda x: f"{x} Equity" if not pd.isna(x) else None
+            )
         
         # Standardize column names
         constituents = constituents.rename(columns={
@@ -43,6 +44,79 @@ class BaseConstituentProvider:
         
         # Add as_of_date
         constituents['as_of_date'] = datetime.now().strftime('%Y-%m-%d')
+        
+        # Add sector field if missing
+        if 'sector' not in constituents.columns:
+            constituents['sector'] = ''
+        
+        # Try to get sector information from Bloomberg if we have tickers
+        try:
+            if not constituents.empty and self.bloomberg:
+                # Get the tickers that need sector information
+                tickers_with_bbg = [
+                    t for t in constituents['bloomberg_ticker'].tolist() 
+                    if pd.notna(t) and t.strip()
+                ]
+                
+                if tickers_with_bbg:
+                    # Request sector information from Bloomberg
+                    sector_fields = ['GICS_SECTOR_NAME', 'INDUSTRY_SECTOR']
+                    sector_info = self.bloomberg.get_security_info(tickers_with_bbg, sector_fields)
+                    
+                    # Map sector information back to constituents
+                    if not sector_info.empty and 'ticker' in sector_info.columns:
+                        # Create a mapping from ticker to sector
+                        ticker_to_sector = {}
+                        for _, row in sector_info.iterrows():
+                            ticker = row['ticker'].split()[0]  # Remove " Equity" part
+                            for field in sector_fields:
+                                if field in row and pd.notna(row[field]):
+                                    ticker_to_sector[ticker] = row[field]
+                                    break
+                        
+                        # Apply the mapping to the constituents DataFrame
+                        constituents['sector'] = constituents['ticker'].apply(
+                            lambda x: ticker_to_sector.get(x, '')
+                        )
+        except Exception as e:
+            self.logger.warning(f"Error fetching sector information: {e}")
+        
+        # Similarly, try to get missing company names if needed
+        if 'company_name' not in constituents.columns or constituents['company_name'].isna().any():
+            try:
+                # Get tickers that need company name information
+                need_names = constituents[
+                    ~constituents['bloomberg_ticker'].isna() & 
+                    (constituents.get('company_name', pd.Series('', index=constituents.index)).isna())
+                ]
+                
+                if not need_names.empty:
+                    tickers_to_fetch = need_names['bloomberg_ticker'].tolist()
+                    company_info = self.bloomberg.get_security_info(tickers_to_fetch, ['SECURITY_NAME'])
+                    
+                    if not company_info.empty and 'ticker' in company_info.columns:
+                        # Create mapping from ticker to company name
+                        ticker_to_name = {}
+                        for _, row in company_info.iterrows():
+                            if 'SECURITY_NAME' in row and pd.notna(row['SECURITY_NAME']):
+                                ticker = row['ticker'].split()[0]  # Remove " Equity" part
+                                ticker_to_name[ticker] = row['SECURITY_NAME']
+                        
+                        # Apply the mapping to add or update company names
+                        if 'company_name' not in constituents.columns:
+                            constituents['company_name'] = ''
+                        
+                        # Update names where missing
+                        for ticker, name in ticker_to_name.items():
+                            if ticker in constituents['ticker'].values:
+                                idx = constituents[constituents['ticker'] == ticker].index
+                                constituents.loc[idx, 'company_name'] = name
+            except Exception as e:
+                self.logger.warning(f"Error fetching company names: {e}")
+            
+        # Set index to ticker for compatibility with import_current_constituents
+        if 'ticker' in constituents.columns:
+            constituents = constituents.set_index('ticker')
         
         return constituents
     
