@@ -15,6 +15,7 @@ class IndexDatabase:
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
+        self.logger = logging.getLogger(__name__)
         self._create_tables()
         
     def _create_tables(self):
