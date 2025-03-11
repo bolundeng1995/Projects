@@ -48,7 +48,7 @@ class IndexDatabase:
         )
         ''')
         
-        # Create historical constituents table (for tracking over time)
+        # Create improved historical constituents table
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS constituents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -58,8 +58,9 @@ class IndexDatabase:
             company_name TEXT,
             weight REAL,
             sector TEXT,
-            as_of_date TEXT NOT NULL,
-            UNIQUE(index_id, ticker, as_of_date),
+            reference_date TEXT NOT NULL,  -- The date these constituents were valid for
+            import_date TEXT NOT NULL,     -- When this data was imported/created
+            UNIQUE(index_id, ticker, reference_date),
             FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
         )
         ''')
@@ -161,6 +162,7 @@ class IndexDatabase:
             weight = data.get('weight', 0.0)
             sector = data.get('sector', '')
             as_of_date = data.get('as_of_date', datetime.now().strftime('%Y-%m-%d'))
+            import_date = datetime.now().strftime('%Y-%m-%d')
             
             # Insert or replace in current_constituents table (latest data)
             self.cursor.execute('''
@@ -169,12 +171,12 @@ class IndexDatabase:
             VALUES (?, ?, ?, ?, ?, ?, ?)
             ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date))
             
-            # Also record in historical constituents table
+            # Also record in historical constituents table with reference_date
             self.cursor.execute('''
             INSERT OR REPLACE INTO constituents
-            (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date))
+            (index_id, ticker, bloomberg_ticker, company_name, weight, sector, reference_date, import_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (index_id, ticker, bloomberg_ticker, company_name, weight, sector, as_of_date, import_date))
             
             self.conn.commit()
             return True
@@ -524,81 +526,31 @@ class IndexDatabase:
             DataFrame containing constituents as of the specified date
         """
         try:
-            # First get all additions up to the specified date
-            additions_query = '''
-                SELECT ticker, bloomberg_ticker, implementation_date, new_weight
-                FROM constituent_changes 
-                WHERE index_id = ? 
-                AND event_type = 'ADD'
-                AND implementation_date <= ?
-                ORDER BY implementation_date
+            # Find the closest reference_date before or equal to the requested date
+            date_query = '''
+                SELECT MAX(reference_date) as closest_date
+                FROM constituents
+                WHERE index_id = ? AND reference_date <= ?
             '''
             
-            additions = pd.read_sql_query(additions_query, self.conn, 
-                                        params=(index_id, as_of_date))
+            closest_date = pd.read_sql_query(date_query, self.conn, 
+                                         params=(index_id, as_of_date)).iloc[0]['closest_date']
             
-            # Get all deletions up to the specified date
-            deletions_query = '''
-                SELECT ticker, implementation_date 
-                FROM constituent_changes 
-                WHERE index_id = ? 
-                AND event_type = 'DELETE'
-                AND implementation_date <= ?
-                ORDER BY implementation_date
-            '''
-            
-            deletions = pd.read_sql_query(deletions_query, self.conn,
-                                        params=(index_id, as_of_date))
-            
-            # If we have no historical data, return empty DataFrame
-            if additions.empty:
-                self.logger.warning(f"No historical constituent data for {index_id} as of {as_of_date}")
+            if not closest_date:
+                self.logger.warning(f"No historical constituent data for {index_id} before {as_of_date}")
                 return pd.DataFrame()
             
-            # For each ticker, get the most recent addition or weight change
-            # that is still before or on the specified date
-            historical_constituents = []
+            # Get all constituents from that reference date
+            query = '''
+                SELECT * FROM constituents
+                WHERE index_id = ? AND reference_date = ?
+                ORDER BY weight DESC
+            '''
             
-            # Process additions (or weight changes)
-            for ticker in additions['ticker'].unique():
-                # Get all changes for this ticker
-                ticker_changes = additions[additions['ticker'] == ticker]
-                
-                # Get the most recent change before or on the specified date
-                most_recent = ticker_changes.sort_values('implementation_date', ascending=False).iloc[0]
-                
-                # Check if it was later deleted before the specified date
-                deleted = ticker in deletions['ticker'].values
-                if deleted:
-                    deletion_date = deletions[deletions['ticker'] == ticker]['implementation_date'].max()
-                    if deletion_date > most_recent['implementation_date']:
-                        # Skip this ticker, it was deleted after its last addition
-                        continue
-                    
-                # Add to our list of historical constituents
-                historical_constituents.append({
-                    'ticker': most_recent['ticker'],
-                    'bloomberg_ticker': most_recent['bloomberg_ticker'],
-                    'weight': most_recent['new_weight'],
-                    'last_updated': most_recent['implementation_date']
-                })
+            result = pd.read_sql_query(query, self.conn, params=(index_id, closest_date))
             
-            # Convert to DataFrame
-            result = pd.DataFrame(historical_constituents)
-            
-            # Try to supplement with more data if available
-            if not result.empty:
-                # Get current constituent data to fill in missing fields
-                current = self.get_current_constituents(index_id)
-                
-                if not current.empty:
-                    # Use current data to fill in fields like sector, industry, etc.
-                    result = pd.merge(
-                        result, 
-                        current[['ticker', 'company_name', 'sector', 'industry', 'market_cap']],
-                        on='ticker', 
-                        how='left'
-                    )
+            if result.empty:
+                self.logger.warning(f"No historical constituents found for {index_id} on {closest_date}")
             
             return result
         
