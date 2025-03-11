@@ -26,7 +26,6 @@ from src.data.bloomberg_client import BloombergClient
 from src.data.importers.price_data import PriceDataImporter
 from src.data.importers.index_constituents import IndexConstituentImporter
 from src.data.calendar import RebalanceCalendar
-from src.data.corporate_action_handler import CorporateActionHandler
 
 # Configure logging
 logging.basicConfig(
@@ -152,38 +151,6 @@ def import_rebalance_calendar(db, bloomberg):
     event_count = calendar.update_all_calendars()
     logger.info(f"Added {event_count} rebalance events to calendar")
 
-def import_corporate_actions(db, bloomberg, lookback_days=LOOKBACK_DAYS):
-    """Import corporate actions for index constituents"""
-    corp_handler = CorporateActionHandler(db, bloomberg)
-    
-    # Calculate date range
-    end_date = datetime.now().date()
-    start_date = end_date - timedelta(days=lookback_days)
-    start_date_str = start_date.strftime('%Y-%m-%d')
-    end_date_str = end_date.strftime('%Y-%m-%d')
-    
-    logger.info(f"Importing corporate actions from {start_date_str} to {end_date_str}")
-    
-    # Import for all indices
-    indices_df = db.get_all_indices()
-    
-    for _, row in tqdm(indices_df.iterrows(), desc="Processing corporate actions", total=len(indices_df)):
-        index_id = row['index_id']
-        
-        # Get constituents for this index
-        constituents = db.get_current_constituents(index_id)
-        
-        if not constituents.empty:
-            tickers = constituents['ticker'].tolist()
-            logger.info(f"Importing corporate actions for {len(tickers)} constituents of {index_id}")
-            
-            # Import in batches to avoid overwhelming the API
-            batch_size = 50
-            for i in range(0, len(tickers), batch_size):
-                batch = tickers[i:i+batch_size]
-                corp_handler.import_corporate_actions(batch, start_date_str, end_date_str)
-                time.sleep(2)  # Give the API a break
-
 def display_imported_data_summary(db):
     """Display a summary of the data that was imported into the database"""
     print("\n===== IMPORT SUMMARY =====\n")
@@ -247,24 +214,6 @@ def display_imported_data_summary(db):
     else:
         print("  • No upcoming rebalance events found")
     
-    # 5. Show corporate actions first/last 5
-    print("\nCorporate actions:")
-    actions = db.get_corporate_actions()  # Get all actions
-    if not actions.empty:
-        total_actions = len(actions)
-        print(f"Found {total_actions} corporate actions")
-        
-        print("\n  Most recent actions:")
-        for _, action in actions.head(5).iterrows():
-            print(f"  • {action['ticker']}: {action['action_type']} on {action['effective_date']} - {action['description']}")
-        
-        if total_actions > 10:
-            print("\n  Oldest actions:")
-            for _, action in actions.tail(5).iterrows():
-                print(f"  • {action['ticker']}: {action['action_type']} on {action['effective_date']} - {action['description']}")
-    else:
-        print("  • No corporate actions found")
-    
     print("\n===== END OF SUMMARY =====")
 
 def main():
@@ -293,9 +242,6 @@ def main():
         
         # Import rebalance calendar
         import_rebalance_calendar(db, bloomberg)
-        
-        # Import corporate actions
-        import_corporate_actions(db, bloomberg)
         
         logger.info("Historical data import completed successfully")
         

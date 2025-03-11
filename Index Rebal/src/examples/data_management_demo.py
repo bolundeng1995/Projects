@@ -8,7 +8,6 @@ from src.data.bloomberg_client import BloombergClient
 from src.data.importers.price_data import PriceDataImporter
 from src.data.importers.index_constituents import IndexConstituentImporter
 from src.data.importers.index_constituent_analyzer import IndexConstituentAnalyzer
-from src.data.corporate_action_handler import CorporateActionHandler
 from src.data.calendar import RebalanceCalendar
 
 # Configure logging
@@ -70,7 +69,6 @@ def main():
         constituent_importer = IndexConstituentImporter(db, bloomberg)
         price_importer = PriceDataImporter(db, bloomberg)
         constituent_analyzer = IndexConstituentAnalyzer(db, bloomberg)
-        corporate_handler = CorporateActionHandler(db, bloomberg)
         calendar = RebalanceCalendar(db, bloomberg)
         
         # Step 1: Import current constituents for all indices
@@ -137,17 +135,6 @@ def main():
                 
         # Step 5: Check for corporate actions
         logger.info("Checking for corporate actions...")
-        
-        # Update corporate actions
-        corporate_handler.update_corporate_actions()
-        
-        # Specifically check for M&A activity
-        ma_count = corporate_handler.update_mergers_acquisitions()
-        logger.info(f"Found {ma_count} relevant M&A events")
-        
-        # Check for ticker changes
-        ticker_changes = corporate_handler.update_ticker_changes()
-        logger.info(f"Found {ticker_changes} ticker changes")
         
         # Step 6: Display upcoming rebalance events
         upcoming_events = calendar.get_upcoming_events(days_ahead=60)
