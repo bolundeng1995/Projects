@@ -68,7 +68,7 @@ class BaseConstituentProvider:
                         # Create a mapping from ticker to sector
                         ticker_to_sector = {}
                         for _, row in sector_info.iterrows():
-                            ticker = row['ticker'].split()[0]  # Remove " Equity" part
+                            ticker = row['ticker'].replace(" Equity", "")  # Remove " Equity" part
                             for field in sector_fields:
                                 if field in row and pd.notna(row[field]):
                                     ticker_to_sector[ticker] = row[field]
