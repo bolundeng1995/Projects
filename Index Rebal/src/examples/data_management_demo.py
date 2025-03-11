@@ -47,6 +47,12 @@ def initialize_database(db_path='index_rebalance.db'):
     db.add_index('NASDAQ', 'Nasdaq 100', 'NDX Index', 'Quarterly',
                 description='Large-cap tech-focused equities')
     
+    # MSCI indices
+    db.add_index('MSCI_EAFE', 'MSCI EAFE', 'MXEA Index', 'Quarterly',
+                description='Developed markets ex-US and Canada')
+    db.add_index('MSCI_EM', 'MSCI Emerging Markets', 'MXEF Index', 'Quarterly',
+                description='Emerging markets')
+    
     logger.info("Database initialized with indices")
     return db
 
@@ -133,10 +139,8 @@ def main():
             else:
                 logger.info(f"No rebalance dates found for {index_id}")
                 
-        # Step 5: Check for corporate actions
-        logger.info("Checking for corporate actions...")
         
-        # Step 6: Display upcoming rebalance events
+        # Step 5: Display upcoming rebalance events
         upcoming_events = calendar.get_upcoming_events(days_ahead=60)
         
         if not upcoming_events.empty:
@@ -155,7 +159,7 @@ def main():
         else:
             logger.info("No upcoming rebalance events found")
             
-        # Step 7: Analyze historical patterns
+        # Step 6: Analyze historical patterns
         logger.info("Analyzing historical patterns for indices...")
         for index_id in indices['index_id']:
             patterns = constituent_analyzer.analyze_historical_patterns(index_id)
