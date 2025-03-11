@@ -56,13 +56,9 @@ class PriceDataImporter:
                 "PX_HIGH": "high",
                 "PX_LOW": "low",
                 "PX_LAST": "close",
-                "VOLUME": "volume",
-                "TOT_RETURN_INDEX_GROSS_DVDS": "adj_close"
+                "VOLUME": "volume"
             })
             
-            # If adj_close wasn't returned, use close instead
-            if "adj_close" not in renamed_data.columns:
-                renamed_data["adj_close"] = renamed_data["close"]
                 
             # Store in result dictionary
             result[ticker] = renamed_data
@@ -157,8 +153,6 @@ class PriceDataImporter:
                     "VOLUME": "volume"
                 })
                 
-                # Add adj_close column (same as close for indices)
-                data["adj_close"] = data["close"]
                 
                 # Store in database
                 self.db.add_price_data(index_id, data)
@@ -217,8 +211,6 @@ class PriceDataImporter:
             
             df.rename(columns=column_map, inplace=True)
             
-            # Add adj_close (use close since Bloomberg data is adjusted)
-            df['adj_close'] = df['close']
             
             # Store in database
             return self.db.add_price_data(ticker, df)
