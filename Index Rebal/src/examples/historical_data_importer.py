@@ -46,13 +46,13 @@ LOOKBACK_DAYS = 180  # Changed from 730 days (2 years) to 90 days
 INDICES = [
     # Index_ID, Index_Name, Bloomberg_Ticker, Rebalance_Frequency, Description
     ("SP500", "S&P 500", "SPX Index", "Quarterly", "Large-cap US equities"),
-    # ("SP400", "S&P MidCap 400", "MID Index", "Quarterly", "Mid-cap US equities"),
-    # ("SP600", "S&P SmallCap 600", "SML Index", "Quarterly", "Small-cap US equities"),
-    # ("RUSSELL1000", "Russell 1000", "RIY Index", "Annual", "Large-cap US equities"),
-    # ("RUSSELL2000", "Russell 2000", "RTY Index", "Annual", "Small-cap US equities"),
-    # ("NASDAQ100", "Nasdaq 100", "NDX Index", "Quarterly", "Large-cap tech-focused equities"),
-    # ("MSCI_EAFE", "MSCI EAFE", "MXEA Index", "Quarterly", "Developed markets ex-US and Canada"),
-    # ("MSCI_EM", "MSCI Emerging Markets", "MXEF Index", "Quarterly", "Emerging markets")
+    ("SP400", "S&P MidCap 400", "MID Index", "Quarterly", "Mid-cap US equities"),
+    ("SP600", "S&P SmallCap 600", "SML Index", "Quarterly", "Small-cap US equities"),
+    ("RUSSELL1000", "Russell 1000", "RIY Index", "Annual", "Large-cap US equities"),
+    ("RUSSELL2000", "Russell 2000", "RTY Index", "Annual", "Small-cap US equities"),
+    ("NASDAQ100", "Nasdaq 100", "NDX Index", "Quarterly", "Large-cap tech-focused equities"),
+    ("MSCI_EAFE", "MSCI EAFE", "MXEA Index", "Quarterly", "Developed markets ex-US and Canada"),
+    ("MSCI_EM", "MSCI Emerging Markets", "MXEF Index", "Quarterly", "Emerging markets")
 ]
 
 def initialize_database(db_path='index_history.db'):

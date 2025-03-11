@@ -217,6 +217,29 @@ def main():
         
         print("\n")
         
+        # Add MSCI indices demo to the Bloomberg Client Demo
+        try:
+            logger.info("\n--- MSCI Indices ---")
+            
+            # Demo MSCI EAFE Index
+            logger.info("DEMO: Getting MSCI EAFE constituents")
+            msci_eafe_constituents = bloomberg.get_index_member_weights("MXEA Index")
+            if not msci_eafe_constituents.empty:
+                logger.info(f"MSCI EAFE has {len(msci_eafe_constituents)} constituents")
+                logger.info("Top 5 constituents by weight:")
+                print(msci_eafe_constituents.head(5))
+            
+            # Demo MSCI EM Index
+            logger.info("\nDEMO: Getting MSCI EM constituents")
+            msci_em_constituents = bloomberg.get_index_member_weights("MXEF Index")
+            if not msci_em_constituents.empty:
+                logger.info(f"MSCI EM has {len(msci_em_constituents)} constituents")
+                logger.info("Top 5 constituents by weight:")
+                print(msci_em_constituents.head(5))
+            
+        except Exception as e:
+            logger.error(f"Error during MSCI indices demo: {e}")
+        
     except Exception as e:
         logger.error(f"Error during Bloomberg data retrieval: {e}")
     finally:

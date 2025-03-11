@@ -4,6 +4,7 @@ from typing import List, Dict, Any, Optional, Tuple
 import logging
 from datetime import datetime, timedelta
 from src.data.bloomberg_client import BloombergClient
+from src.data.importers.index_constituents import IndexConstituentImporter
 
 class IndexConstituentAnalyzer:
     """
@@ -11,10 +12,13 @@ class IndexConstituentAnalyzer:
     and identifies additions/deletions
     """
     
-    def __init__(self, database, bloomberg_client: BloombergClient):
+    def __init__(self, database, bloomberg_client):
         self.db = database
         self.bloomberg = bloomberg_client
         self.logger = logging.getLogger(__name__)
+        
+        # Create constituent importer to access providers
+        self.constituent_importer = IndexConstituentImporter(database, bloomberg_client)
         
     def detect_constituent_changes(self, index_id: str, lookback_days: int = 30) -> pd.DataFrame:
         """
@@ -84,99 +88,29 @@ class IndexConstituentAnalyzer:
             self.logger.error(f"Error detecting constituent changes for {index_id}: {e}")
             return pd.DataFrame()
             
-    def fetch_announcement_dates(self, index_id: str) -> Dict[str, str]:
+    def fetch_announcement_dates(self, index_id: str) -> Dict[str, Dict[str, str]]:
         """
-        Fetch announcement dates for index rebalances from Bloomberg
+        Fetch upcoming rebalance announcement dates for an index
         
         Args:
-            index_id: Internal index identifier
+            index_id: Index identifier
             
         Returns:
-            Dictionary mapping event types to announcement dates
+            Dict with announcement types and dates
         """
-        try:
-            # Get Bloomberg ticker for the index
-            query = "SELECT bloomberg_ticker FROM index_metadata WHERE index_id = ?"
-            result = pd.read_sql_query(query, self.db.conn, params=(index_id,))
-            
-            if result.empty:
-                self.logger.error(f"Index {index_id} not found in metadata")
-                return {}
-                
-            bb_ticker = result["bloomberg_ticker"].iloc[0]
-            
-            # Different indices have different announcement schedules
-            # We need to check Bloomberg for this information
-            
-            # For S&P indices, use INDX_REBALANCE_ANNOUNCE_DT field
-            if index_id.startswith("SP"):
-                fields = ["INDX_REBALANCE_ANNOUNCE_DT", "INDX_REBALANCE_EFF_DT"]
-                dates = self.bloomberg.get_security_info([bb_ticker], fields)
-                
-                if dates.empty:
-                    self.logger.warning(f"No rebalance dates found for {index_id}")
-                    return {}
-                    
-                announce_date = dates.get("INDX_REBALANCE_ANNOUNCE_DT", [None])[0]
-                effective_date = dates.get("INDX_REBALANCE_EFF_DT", [None])[0]
-                
-                return {
-                    "QUARTERLY_REBALANCE": {
-                        "announcement_date": announce_date,
-                        "implementation_date": effective_date
-                    }
-                }
-                
-            # For Russell indices, use separate fields for reconstitution
-            elif index_id.startswith("RUSSELL"):
-                fields = [
-                    "RECONSTITUTION_PRELIM_DATE", 
-                    "RECONSTITUTION_ANNOUNCE_DT", 
-                    "RECONSTITUTION_EFFECT_DATE"
-                ]
-                dates = self.bloomberg.get_security_info([bb_ticker], fields)
-                
-                if dates.empty:
-                    self.logger.warning(f"No reconstitution dates found for {index_id}")
-                    return {}
-                
-                prelim_date = dates.get("RECONSTITUTION_PRELIM_DATE", [None])[0]
-                announce_date = dates.get("RECONSTITUTION_ANNOUNCE_DT", [None])[0]
-                effect_date = dates.get("RECONSTITUTION_EFFECT_DATE", [None])[0]
-                
-                return {
-                    "ANNUAL_RECONSTITUTION": {
-                        "preliminary_date": prelim_date,
-                        "announcement_date": announce_date,
-                        "implementation_date": effect_date
-                    }
-                }
-                
-            # For Nasdaq indices
-            elif index_id.startswith("NASDAQ"):
-                # Nasdaq has different rebalance schedule and fields
-                fields = ["INDX_REBALANCE_ANNOUNCE_DT", "INDX_REBALANCE_EFF_DT"]
-                dates = self.bloomberg.get_security_info([bb_ticker], fields)
-                
-                if dates.empty:
-                    self.logger.warning(f"No rebalance dates found for {index_id}")
-                    return {}
-                    
-                announce_date = dates.get("INDX_REBALANCE_ANNOUNCE_DT", [None])[0]
-                effective_date = dates.get("INDX_REBALANCE_EFF_DT", [None])[0]
-                
-                return {
-                    "QUARTERLY_REBALANCE": {
-                        "announcement_date": announce_date,
-                        "implementation_date": effective_date
-                    }
-                }
-                
+        # Get index metadata
+        index_metadata = self.db.get_index_metadata(index_id)
+        
+        if not index_metadata:
+            self.logger.error(f"No metadata found for index {index_id}")
             return {}
-            
-        except Exception as e:
-            self.logger.error(f"Error fetching announcement dates for {index_id}: {e}")
-            return {}
+        
+        # Get the appropriate provider using the importer
+        provider = self.constituent_importer._get_provider(index_id)
+        bloomberg_ticker = index_metadata.get('bloomberg_ticker')
+        
+        # Delegate to the provider
+        return provider.get_announcement_dates(bloomberg_ticker)
             
     def analyze_historical_patterns(self, index_id: str) -> Dict[str, Any]:
         """
