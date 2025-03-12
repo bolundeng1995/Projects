@@ -34,16 +34,20 @@ class IndexDatabase:
         )
         ''')
         
-        # Index constituents table
+        # Index constituents table - Updated schema with all required fields
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS index_constituents (
             index_id TEXT,
-            ticker TEXT,
-            name TEXT,
-            weight REAL,
-            sector TEXT,
-            as_of_date TEXT,
-            PRIMARY KEY (index_id, ticker, as_of_date),
+            symbol TEXT,
+            index_shares REAL,
+            index_weight REAL,
+            closing_price REAL,
+            market_value REAL,
+            sedol TEXT,
+            cusip TEXT,
+            isin TEXT,
+            reference_date TEXT,
+            PRIMARY KEY (index_id, symbol, reference_date),
             FOREIGN KEY (index_id) REFERENCES index_metadata(index_id)
         )
         ''')
@@ -67,7 +71,7 @@ class IndexDatabase:
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_data_ticker ON price_data(ticker)')
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_data_date ON price_data(date)')
         self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_constituents_index_id ON index_constituents(index_id)')
-        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_constituents_ticker ON index_constituents(ticker)')
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_constituents_symbol ON index_constituents(symbol)')
         
         self.conn.commit()
         
@@ -505,7 +509,7 @@ class IndexDatabase:
             self.logger.error(f"Error getting historical constituents for {index_id} as of {as_of_date}: {e}")
             return pd.DataFrame()
     
-    def add_index_constituent(self, data: Dict) -> bool:
+    def add_index_constituent(self, data):
         """
         Add or update an index constituent
         
@@ -532,7 +536,7 @@ class IndexDatabase:
             reference_date = data.get('reference_date')
             
             if not all([index_id, symbol, reference_date]):
-                self.logger.error("Missing required fields for constituent: index_id, symbol, reference_date")
+                logging.error("Missing required fields for constituent: index_id, symbol, reference_date")
                 return False
             
             # Extract optional fields with defaults
@@ -543,47 +547,51 @@ class IndexDatabase:
             sedol = data.get('sedol', '')
             cusip = data.get('cusip', '')
             isin = data.get('isin', '')
-            import_date = datetime.now().strftime('%Y-%m-%d')
             
             # Insert or replace in index_constituents table
             self.cursor.execute('''
             INSERT OR REPLACE INTO index_constituents
-            (index_id, ticker, name, weight, sector, as_of_date, sedol, cusip, isin)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (index_id, symbol, symbol, index_weight, '', as_of_date, sedol, cusip, isin))
+            (index_id, symbol, index_shares, index_weight, closing_price, market_value, 
+             sedol, cusip, isin, reference_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                index_id, symbol, index_shares, index_weight, closing_price, market_value,
+                sedol, cusip, isin, reference_date
+            ))
             
             self.conn.commit()
             return True
         except Exception as e:
-            self.logger.error(f"Error adding index constituent: {e}")
+            logging.error(f"Error adding index constituent: {e}")
             self.conn.rollback()
             return False
 
-    def get_index_constituents(self, index_id, as_of_date=None):
+    def get_index_constituents(self, index_id, reference_date=None):
         """
         Get constituents for an index as of a specific date
         
         Args:
             index_id: ID of the index
-            as_of_date: Date to get constituents for (default: latest available)
+            reference_date: Date to get constituents for (default: latest available)
             
         Returns:
             DataFrame with constituent data
         """
         query = """
-        SELECT ticker, name, weight, sector, as_of_date
+        SELECT index_id, symbol, index_shares, index_weight, closing_price, market_value,
+               sedol, cusip, isin, reference_date
         FROM index_constituents
         WHERE index_id = ?
         """
         
         params = [index_id]
         
-        if as_of_date:
-            query += " AND as_of_date = ?"
-            params.append(as_of_date)
+        if reference_date:
+            query += " AND reference_date = ?"
+            params.append(reference_date)
         else:
             # Get the latest date for each ticker
-            query += " AND as_of_date = (SELECT MAX(as_of_date) FROM index_constituents WHERE index_id = ?)"
+            query += " AND reference_date = (SELECT MAX(reference_date) FROM index_constituents WHERE index_id = ?)"
             params.append(index_id)
         
         return pd.read_sql_query(query, self.conn, params=params)
