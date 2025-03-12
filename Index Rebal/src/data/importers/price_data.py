@@ -133,8 +133,8 @@ class PriceDataImporter:
                 index_id = row["index_id"]
                 bb_ticker = row["bloomberg_ticker"]
                 
-                # Define fields to request
-                fields = ["PX_OPEN", "PX_HIGH", "PX_LOW", "PX_LAST", "VOLUME"]
+                # Define fields to request including daily return
+                fields = ["PX_OPEN", "PX_HIGH", "PX_LOW", "PX_LAST", "VOLUME", "DAY_TO_DAY_TOTAL_RETURN_GROSS_DVDS"]
                 
                 # Get data from Bloomberg
                 bb_data = self.bloomberg.get_historical_data(
@@ -150,9 +150,9 @@ class PriceDataImporter:
                     "PX_HIGH": "high",
                     "PX_LOW": "low",
                     "PX_LAST": "close",
-                    "VOLUME": "volume"
+                    "VOLUME": "volume",
+                    "DAY_TO_DAY_TOTAL_RETURN_GROSS_DVDS": "return"
                 })
-                
                 
                 # Store in database
                 self.db.add_price_data(index_id, data)

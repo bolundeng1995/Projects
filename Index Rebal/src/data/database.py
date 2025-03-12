@@ -32,6 +32,26 @@ class IndexDatabase:
         )
         ''')
         
+        # Create index_constituents table for all constituent data
+        self.cursor.execute('''
+        CREATE TABLE IF NOT EXISTS index_constituents (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            index_id TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            index_shares REAL,
+            index_weight REAL,
+            closing_price REAL,
+            market_value REAL,
+            sedol TEXT,
+            cusip TEXT,
+            isin TEXT,
+            reference_date TEXT NOT NULL,
+            import_date TEXT NOT NULL,
+            UNIQUE(index_id, symbol, reference_date),
+            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        )
+        ''')
+        
         # Create current constituents table (for latest data)
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS current_constituents (
@@ -76,6 +96,7 @@ class IndexDatabase:
             low REAL,
             close REAL,
             volume INTEGER,
+            return REAL,
             UNIQUE(ticker, date)
         )
         ''')
@@ -251,55 +272,46 @@ class IndexDatabase:
             # Convert column names to lowercase
             df.columns = [col.lower() for col in df.columns]
             
-            # Add adj_close if not present
-            if 'adj_close' not in df.columns and 'close' in df.columns:
-                df['adj_close'] = df['close']
-                
             # Check all required columns are present
             missing_columns = set(required_columns) - set(df.columns)
             if missing_columns:
-                self.logger.error(f"Missing required price columns for {ticker}: {missing_columns}")
+                self.logger.warning(f"Missing required price columns for {ticker}: {missing_columns}")
                 return False
                 
-            # Check for datetime index and handle properly
-            if df.index.name == 'date' or df.index.name == 'Date':
-                # Explicitly convert index to DatetimeIndex
-                df.index = pd.DatetimeIndex(df.index)
-                df = df.reset_index()
-            elif isinstance(df.index, pd.DatetimeIndex):
-                df = df.reset_index()
-                df.rename(columns={'index': 'date'}, inplace=True)
-            else:
-                # If index is not a DatetimeIndex, ensure there's a date column
-                if 'date' not in df.columns:
-                    self.logger.error(f"No date column in price data for {ticker}")
+            # Make sure the index is the date
+            if not isinstance(df.index, pd.DatetimeIndex):
+                # If there's a 'date' column, set it as index
+                if 'date' in df.columns:
+                    df['date'] = pd.to_datetime(df['date'])
+                    df = df.set_index('date')
+                else:
+                    self.logger.warning(f"No date index or column for {ticker}")
                     return False
-            
-            # Ensure date is properly formatted
-            df['date'] = pd.to_datetime(df['date'])
                 
-            # Add ticker column
-            df['ticker'] = ticker
-            
-            # Convert date to string format for SQLite storage
+            # Reset index to get date as a column
+            df = df.reset_index()
             df['date'] = df['date'].dt.strftime('%Y-%m-%d')
             
-            # Select only the required columns
-            cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'adj_close']
-            df = df[cols]
+            # Add ticker column if it doesn't exist
+            if 'ticker' not in df.columns:
+                df['ticker'] = ticker
             
-            # Instead of using to_sql which doesn't handle conflicts well
-            # Prepare the data in a format suitable for executemany
-            # Convert DataFrame to list of tuples
-            records = df.to_records(index=False)
-            data_tuples = list(records)
+            # Build columns list for SQL insert
+            columns = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'return']
             
-            # Use INSERT OR REPLACE to handle existing records
-            self.conn.executemany('''
+            df_subset = df[columns]
+            
+            # Convert to list of tuples for efficient sqlite insert
+            data_tuples = [tuple(x) for x in df_subset.to_numpy()]
+            
+            # Build SQL statement dynamically based on columns
+            sql = f'''
                 INSERT OR REPLACE INTO price_data
-                (ticker, date, open, high, low, close, volume, adj_close)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', data_tuples)
+                ({', '.join(columns)})
+                VALUES ({', '.join(['?'] * len(columns))})
+            '''
+            
+            self.conn.executemany(sql, data_tuples)
             
             self.conn.commit()
             return True
@@ -556,4 +568,106 @@ class IndexDatabase:
         
         except Exception as e:
             self.logger.error(f"Error getting historical constituents for {index_id} as of {as_of_date}: {e}")
+            return pd.DataFrame()
+    
+    def add_index_constituent(self, data: Dict) -> bool:
+        """
+        Add or update an index constituent
+        
+        Args:
+            data: Dictionary with constituent data including:
+                - index_id: Index identifier
+                - symbol: Constituent symbol
+                - index_shares: Number of shares in the index
+                - index_weight: Weight in the index
+                - closing_price: Closing price
+                - market_value: Market value
+                - sedol: SEDOL identifier
+                - cusip: CUSIP identifier
+                - isin: ISIN identifier
+                - reference_date: Date this data is valid for
+                
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            # Extract required fields
+            index_id = data.get('index_id')
+            symbol = data.get('symbol')
+            reference_date = data.get('reference_date')
+            
+            if not all([index_id, symbol, reference_date]):
+                self.logger.error("Missing required fields for constituent: index_id, symbol, reference_date")
+                return False
+            
+            # Extract optional fields with defaults
+            index_shares = data.get('index_shares', 0)
+            index_weight = data.get('index_weight', 0)
+            closing_price = data.get('closing_price', 0)
+            market_value = data.get('market_value', 0)
+            sedol = data.get('sedol', '')
+            cusip = data.get('cusip', '')
+            isin = data.get('isin', '')
+            import_date = datetime.now().strftime('%Y-%m-%d')
+            
+            # Insert or replace in index_constituents table
+            self.cursor.execute('''
+            INSERT OR REPLACE INTO index_constituents
+            (index_id, symbol, index_shares, index_weight, closing_price, market_value, 
+             sedol, cusip, isin, reference_date, import_date)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (index_id, symbol, index_shares, index_weight, closing_price, market_value,
+                  sedol, cusip, isin, reference_date, import_date))
+            
+            self.conn.commit()
+            return True
+        except Exception as e:
+            self.logger.error(f"Error adding index constituent: {e}")
+            self.conn.rollback()
+            return False
+
+    def get_index_constituents(self, index_id: str, reference_date: Optional[str] = None) -> pd.DataFrame:
+        """
+        Get constituents for an index as of a specific date
+        
+        Args:
+            index_id: Index identifier
+            reference_date: Date to get constituents for (defaults to latest)
+            
+        Returns:
+            DataFrame with constituent data
+        """
+        try:
+            if reference_date:
+                # Get constituents for the specified date
+                query = '''
+                    SELECT * FROM index_constituents
+                    WHERE index_id = ? AND reference_date = ?
+                    ORDER BY index_weight DESC
+                '''
+                return pd.read_sql_query(query, self.conn, params=(index_id, reference_date))
+            else:
+                # Get the most recent date for this index
+                date_query = '''
+                    SELECT MAX(reference_date) as latest_date
+                    FROM index_constituents
+                    WHERE index_id = ?
+                '''
+                
+                latest_date = pd.read_sql_query(date_query, self.conn, params=(index_id,)).iloc[0]['latest_date']
+                
+                if not latest_date:
+                    self.logger.warning(f"No constituent data found for {index_id}")
+                    return pd.DataFrame()
+                
+                # Get constituents for the latest date
+                query = '''
+                    SELECT * FROM index_constituents
+                    WHERE index_id = ? AND reference_date = ?
+                    ORDER BY index_weight DESC
+                '''
+                return pd.read_sql_query(query, self.conn, params=(index_id, latest_date))
+                
+        except Exception as e:
+            self.logger.error(f"Error getting constituents for {index_id}: {e}")
             return pd.DataFrame() 
