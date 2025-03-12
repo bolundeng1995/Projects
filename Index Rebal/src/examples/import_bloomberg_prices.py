@@ -97,7 +97,7 @@ def parse_args():
                        default='OPEN,HIGH,LOW,PX_LAST,VOLUME,DAY_TO_DAY_TOT_RETURN_GROSS_DVDS',
                        help='Fields to fetch from Bloomberg (default includes OHLCV and total return)')
     parser.add_argument('--use-cache', action='store_true',
-                       help='Use cached Bloomberg data when available')
+                       help='Use cached Bloomberg data when available (note: currently ignored)')
     
     # Operation options
     parser.add_argument('--overwrite', action='store_true',
@@ -123,16 +123,32 @@ def fetch_price_data_for_ticker(client, ticker, start_date, end_date, fields):
     logger.info(f"Fetching price data for {ticker} from {start_date} to {end_date}")
     
     try:
-        # Get historical data from Bloomberg
+        # Ensure we're requesting all required fields
+        required_fields = ['OPEN', 'HIGH', 'LOW', 'PX_LAST', 'VOLUME']
+        
+        # Check if all required fields are included in the request
+        field_list = fields.split(',') if isinstance(fields, str) else fields
+        for req_field in required_fields:
+            if req_field not in field_list:
+                logger.warning(f"Required field {req_field} not in request. Adding it.")
+                field_list.append(req_field)
+        
+        # Get historical data from Bloomberg with all required fields
         data = client.get_historical_data(
             tickers=[ticker],
-            fields=fields.split(','),
+            fields=field_list,
             start_date=start_date,
             end_date=end_date
         )
         
         if data.empty:
             logger.warning(f"No data returned from Bloomberg for {ticker}")
+            return pd.DataFrame()
+        
+        # Verify all required Bloomberg fields exist in the returned data
+        missing_fields = [field for field in required_fields if field not in data.columns]
+        if missing_fields:
+            logger.error(f"Missing required fields in Bloomberg data: {', '.join(missing_fields)}")
             return pd.DataFrame()
         
         # Rename Bloomberg fields to match our database schema
@@ -161,6 +177,13 @@ def fetch_price_data_for_ticker(client, ticker, start_date, end_date, fields):
             logger.info(f"Return field not available from Bloomberg for {ticker}, calculating from price data")
             df['return'] = df.groupby('ticker')['close'].pct_change()
         
+        # Verify all required database columns exist now
+        required_db_cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume']
+        missing_db_cols = [col for col in required_db_cols if col not in df.columns]
+        if missing_db_cols:
+            logger.error(f"Missing required database columns after processing: {', '.join(missing_db_cols)}")
+            return pd.DataFrame()
+        
         return df
         
     except Exception as e:
@@ -169,49 +192,28 @@ def fetch_price_data_for_ticker(client, ticker, start_date, end_date, fields):
 
 def fetch_price_data_for_index_constituents(db, client, index_id, start_date, end_date, fields):
     """Fetch price data for all constituents of an index"""
-    logger.info(f"Fetching constituents for index {index_id}")
+    logger.info(f"Fetching constituents for index: {index_id}")
     
-    try:
-        # Get current constituents for the index
-        constituents = db.get_index_constituents(index_id)
-        
-        if constituents.empty:
-            logger.warning(f"No constituents found for index {index_id}")
-            return pd.DataFrame()
-        
-        logger.info(f"Found {len(constituents)} constituents for {index_id}")
-        
-        # Extract tickers (might need mapping to Bloomberg tickers)
-        constituent_tickers = constituents['symbol'].tolist()
-        
-        # Convert tickers to Bloomberg format if needed
-        bloomberg_tickers = []
-        for ticker in constituent_tickers:
-            # Simple mapping - in a real app you might need more robust mapping
-            if not ticker.endswith(' Equity'):
-                bloomberg_ticker = f"{ticker} US Equity"
-            else:
-                bloomberg_ticker = ticker
-            bloomberg_tickers.append(bloomberg_ticker)
-        
-        # Fetch data for each constituent
-        all_data = []
-        for ticker in bloomberg_tickers:
-            df = fetch_price_data_for_ticker(client, ticker, start_date, end_date, fields)
-            if not df.empty:
-                all_data.append(df)
-        
-        if not all_data:
-            logger.warning(f"No price data found for any constituents of {index_id}")
-            return pd.DataFrame()
-        
-        # Combine all data
-        combined_df = pd.concat(all_data, ignore_index=True)
-        return combined_df
-        
-    except Exception as e:
-        logger.error(f"Error fetching constituent data for index {index_id}: {e}")
+    # Get constituents from the database (not Bloomberg)
+    constituents_df = db.get_index_constituents(index_id)
+    
+    if constituents_df.empty:
+        logger.warning(f"No constituents found for index: {index_id}")
         return pd.DataFrame()
+    
+    # Extract Bloomberg tickers
+    tickers = constituents_df['ticker'].tolist()
+    logger.info(f"Found {len(tickers)} constituents for index {index_id}")
+    
+    # Fetch price data for all constituents
+    df = client.get_historical_data(tickers, fields, start_date, end_date)
+    
+    if df.empty:
+        logger.warning(f"No price data returned for constituents of {index_id}")
+    else:
+        logger.info(f"Retrieved price data for constituents of {index_id}")
+    
+    return df
 
 def import_price_data_to_db(db, df, overwrite=False):
     """Import price data from DataFrame to database"""
@@ -220,28 +222,35 @@ def import_price_data_to_db(db, df, overwrite=False):
         return 0
     
     # Ensure we have all required columns
-    required_cols = ['ticker', 'date', 'open', 'high', 'low', 'close']
+    required_cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume']
     missing_cols = [col for col in required_cols if col not in df.columns]
     
     if missing_cols:
         logger.error(f"Missing required columns in data: {', '.join(missing_cols)}")
         return 0
     
-    # Add volume and return if they don't exist
-    if 'volume' not in df.columns:
-        df['volume'] = 0
+    # Create a working copy of the dataframe
+    price_data = df.copy()
     
-    if 'return' not in df.columns:
+    # Check for any rows with missing values in required fields
+    missing_rows = price_data[price_data[required_cols].isna().any(axis=1)]
+    if not missing_rows.empty:
+        logger.warning(f"Found {len(missing_rows)} rows with missing required values. These will be skipped.")
+        # Remove rows with missing values
+        price_data = price_data.dropna(subset=required_cols)
+    
+    if price_data.empty:
+        logger.error("No valid data remains after filtering rows with missing values")
+        return 0
+    
+    # Calculate returns if not already present
+    if 'return' not in price_data.columns:
         logger.info("Return data not available, calculating from price data")
-        df['return'] = df.groupby('ticker')['close'].pct_change()
-    
-    # Convert date column to string format if it's not already
-    if not isinstance(df['date'].iloc[0], str):
-        df['date'] = df['date'].dt.strftime('%Y-%m-%d')
+        price_data['return'] = price_data.groupby('ticker')['close'].pct_change()
     
     # Import each row to the database
     count = 0
-    for _, row in df.iterrows():
+    for _, row in price_data.iterrows():
         try:
             # Check if we already have data for this ticker/date combination
             if not overwrite:
@@ -265,7 +274,7 @@ def import_price_data_to_db(db, df, overwrite=False):
                 row['low'],
                 row['close'],
                 row['volume'],
-                row['return']
+                row.get('return')  # Only return can be NULL
             ))
             
             count += 1
@@ -357,7 +366,10 @@ def main():
     logger.info(f"Connected to database: {args.db_path}")
     
     # Initialize Bloomberg client
-    client = BloombergClient(use_cached_data=args.use_cache)
+    client = BloombergClient()
+    if args.use_cache:
+        logger.info("Note: The --use-cache option is currently not supported by the BloombergClient")
+        
     logger.info("Connected to Bloomberg API")
     
     try:

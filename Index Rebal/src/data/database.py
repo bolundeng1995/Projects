@@ -10,88 +10,64 @@ class IndexDatabase:
     """
     
     def __init__(self, db_path: str = 'index_data.db'):
-        """Initialize the database connection and create tables if needed"""
+        """Initialize the database connection and create tables if they don't exist"""
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row
         self.cursor = self.conn.cursor()
-        self.logger = logging.getLogger(__name__)
+        
+        # Enable foreign keys
+        self.cursor.execute("PRAGMA foreign_keys = ON")
+        
+        # Create tables if they don't exist
         self._create_tables()
         
     def _create_tables(self):
-        """Create tables if they don't exist"""
-        # Create index metadata table
+        """Create the necessary tables if they don't exist"""
+        # Index metadata table
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS index_metadata (
             index_id TEXT PRIMARY KEY,
             index_name TEXT NOT NULL,
-            bloomberg_ticker TEXT NOT NULL,
+            bloomberg_ticker TEXT,
             rebalance_frequency TEXT,
-            description TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            description TEXT
         )
         ''')
         
-        # Create index_constituents table for all constituent data
+        # Index constituents table
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS index_constituents (
-            index_id TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            index_shares REAL,
-            index_weight REAL,
-            closing_price REAL,
-            market_value REAL,
-            sedol TEXT,
-            cusip TEXT,
-            isin TEXT,
-            reference_date TEXT NOT NULL,
-            import_date TEXT NOT NULL,
-            PRIMARY KEY(index_id, symbol, reference_date),
-            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+            index_id TEXT,
+            ticker TEXT,
+            name TEXT,
+            weight REAL,
+            sector TEXT,
+            as_of_date TEXT,
+            PRIMARY KEY (index_id, ticker, as_of_date),
+            FOREIGN KEY (index_id) REFERENCES index_metadata(index_id)
         )
         ''')
         
-        # Create price_data table for all price data
+        # Price data table
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS price_data (
-            ticker TEXT NOT NULL,
-            date TEXT NOT NULL,
+            ticker TEXT,
+            date TEXT,
             open REAL,
             high REAL,
             low REAL,
             close REAL,
             volume INTEGER,
             return REAL,
-            PRIMARY KEY(ticker, date)
+            PRIMARY KEY (ticker, date)
         )
         ''')
         
-        # Create index changes table
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS index_changes (
-            index_id TEXT NOT NULL,
-            symbol TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            start_date TEXT NOT NULL,
-            end_date TEXT NOT NULL,
-            old_weight REAL,
-            new_weight REAL,
-            change REAL,
-            PRIMARY KEY(index_id, symbol, event_type, start_date, end_date),
-            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
-        )
-        ''')
-        
-        # Create cached_responses table for Bloomberg/data provider caching
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS cached_responses (
-            request_hash TEXT PRIMARY KEY,
-            request_type TEXT NOT NULL,
-            request_params TEXT NOT NULL,
-            response_data BLOB,
-            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-        ''')
+        # Create indices for better query performance
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_data_ticker ON price_data(ticker)')
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_price_data_date ON price_data(date)')
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_constituents_index_id ON index_constituents(index_id)')
+        self.cursor.execute('CREATE INDEX IF NOT EXISTS idx_constituents_ticker ON index_constituents(ticker)')
         
         self.conn.commit()
         
@@ -572,11 +548,9 @@ class IndexDatabase:
             # Insert or replace in index_constituents table
             self.cursor.execute('''
             INSERT OR REPLACE INTO index_constituents
-            (index_id, symbol, index_shares, index_weight, closing_price, market_value, 
-             sedol, cusip, isin, reference_date, import_date)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (index_id, symbol, index_shares, index_weight, closing_price, market_value,
-                  sedol, cusip, isin, reference_date, import_date))
+            (index_id, ticker, name, weight, sector, as_of_date, sedol, cusip, isin)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (index_id, symbol, symbol, index_weight, '', as_of_date, sedol, cusip, isin))
             
             self.conn.commit()
             return True
@@ -585,48 +559,48 @@ class IndexDatabase:
             self.conn.rollback()
             return False
 
-    def get_index_constituents(self, index_id: str, reference_date: Optional[str] = None) -> pd.DataFrame:
+    def get_index_constituents(self, index_id, as_of_date=None):
         """
         Get constituents for an index as of a specific date
         
         Args:
-            index_id: Index identifier
-            reference_date: Date to get constituents for (defaults to latest)
+            index_id: ID of the index
+            as_of_date: Date to get constituents for (default: latest available)
             
         Returns:
             DataFrame with constituent data
         """
-        try:
-            if reference_date:
-                # Get constituents for the specified date
-                query = '''
-                    SELECT * FROM index_constituents
-                    WHERE index_id = ? AND reference_date = ?
-                    ORDER BY index_weight DESC
-                '''
-                return pd.read_sql_query(query, self.conn, params=(index_id, reference_date))
-            else:
-                # Get the most recent date for this index
-                date_query = '''
-                    SELECT MAX(reference_date) as latest_date
-                    FROM index_constituents
-                    WHERE index_id = ?
-                '''
-                
-                latest_date = pd.read_sql_query(date_query, self.conn, params=(index_id,)).iloc[0]['latest_date']
-                
-                if not latest_date:
-                    self.logger.warning(f"No constituent data found for {index_id}")
-                    return pd.DataFrame()
-                
-                # Get constituents for the latest date
-                query = '''
-                    SELECT * FROM index_constituents
-                    WHERE index_id = ? AND reference_date = ?
-                    ORDER BY index_weight DESC
-                '''
-                return pd.read_sql_query(query, self.conn, params=(index_id, latest_date))
-                
-        except Exception as e:
-            self.logger.error(f"Error getting constituents for {index_id}: {e}")
-            return pd.DataFrame() 
+        query = """
+        SELECT ticker, name, weight, sector, as_of_date
+        FROM index_constituents
+        WHERE index_id = ?
+        """
+        
+        params = [index_id]
+        
+        if as_of_date:
+            query += " AND as_of_date = ?"
+            params.append(as_of_date)
+        else:
+            # Get the latest date for each ticker
+            query += " AND as_of_date = (SELECT MAX(as_of_date) FROM index_constituents WHERE index_id = ?)"
+            params.append(index_id)
+        
+        return pd.read_sql_query(query, self.conn, params=params)
+
+    def get_index_bloomberg_ticker(self, index_id):
+        """
+        Get the Bloomberg ticker for an index
+        
+        Args:
+            index_id: ID of the index
+            
+        Returns:
+            Bloomberg ticker as string or None if not found
+        """
+        query = "SELECT bloomberg_ticker FROM index_metadata WHERE index_id = ?"
+        result = self.cursor.execute(query, (index_id,)).fetchone()
+        
+        if result:
+            return result[0]
+        return None 

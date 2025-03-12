@@ -5,11 +5,22 @@ Index Metadata Import Script
 A simple script to populate the index_metadata table in the database.
 This creates basic information about indices that can then be used
 for importing constituent and price data.
+
+Usage Examples:
+    # Import all predefined indices into the default database
+    python import_index_metadata.py
+    
+    # Import to a custom database location
+    python import_index_metadata.py --db-path /path/to/my/database.db
+    
+    # Debug mode with more verbose output
+    python import_index_metadata.py --debug
 """
 
 import sys
 import os
 import logging
+import argparse
 
 # Add the project root to the Python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
@@ -22,6 +33,28 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger('import_index_metadata')
+
+def parse_args():
+    """Parse command line arguments"""
+    parser = argparse.ArgumentParser(
+        description='Import index metadata to the database',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Examples:
+  # Import all predefined indices
+  %(prog)s
+  
+  # Use a custom database path
+  %(prog)s --db-path /path/to/custom/index_data.db
+  
+  # Enable debug logging
+  %(prog)s --debug
+"""
+    )
+    parser.add_argument('--db-path', type=str, default='index_data.db',
+                        help='Path to the database file (default: index_data.db)')
+    parser.add_argument('--debug', action='store_true',
+                        help='Enable debug logging')
+    return parser.parse_args()
 
 def main():
     """Main function to import index metadata to the database"""
