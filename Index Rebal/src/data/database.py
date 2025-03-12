@@ -35,7 +35,6 @@ class IndexDatabase:
         # Create index_constituents table for all constituent data
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS index_constituents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             index_id TEXT NOT NULL,
             symbol TEXT NOT NULL,
             index_shares REAL,
@@ -47,48 +46,14 @@ class IndexDatabase:
             isin TEXT,
             reference_date TEXT NOT NULL,
             import_date TEXT NOT NULL,
-            UNIQUE(index_id, symbol, reference_date),
+            PRIMARY KEY(index_id, symbol, reference_date),
             FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
         )
         ''')
         
-        # Create current constituents table (for latest data)
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS current_constituents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            index_id TEXT NOT NULL,
-            ticker TEXT NOT NULL,
-            bloomberg_ticker TEXT NOT NULL,
-            company_name TEXT,
-            weight REAL,
-            sector TEXT,
-            as_of_date TEXT NOT NULL,
-            UNIQUE(index_id, ticker),
-            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
-        )
-        ''')
-        
-        # Create improved historical constituents table
-        self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS constituents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            index_id TEXT NOT NULL,
-            ticker TEXT NOT NULL,
-            bloomberg_ticker TEXT NOT NULL,
-            company_name TEXT,
-            weight REAL,
-            sector TEXT,
-            reference_date TEXT NOT NULL,  -- The date these constituents were valid for
-            import_date TEXT NOT NULL,     -- When this data was imported/created
-            UNIQUE(index_id, ticker, reference_date),
-            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
-        )
-        ''')
-        
-        # Create price data table
+        # Create price_data table for all price data
         self.cursor.execute('''
         CREATE TABLE IF NOT EXISTS price_data (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
             ticker TEXT NOT NULL,
             date TEXT NOT NULL,
             open REAL,
@@ -97,40 +62,34 @@ class IndexDatabase:
             close REAL,
             volume INTEGER,
             return REAL,
-            UNIQUE(ticker, date)
+            PRIMARY KEY(ticker, date)
         )
         ''')
         
-        # Create constituent change events table
+        # Create index changes table
         self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS constituent_changes (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+        CREATE TABLE IF NOT EXISTS index_changes (
             index_id TEXT NOT NULL,
-            ticker TEXT NOT NULL,
-            bloomberg_ticker TEXT NOT NULL,
-            event_type TEXT NOT NULL,  -- ADD, DELETE, WEIGHT_CHANGE
-            announcement_date TEXT,
-            implementation_date TEXT,
-            detection_date TEXT,
+            symbol TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            start_date TEXT NOT NULL,
+            end_date TEXT NOT NULL,
             old_weight REAL,
             new_weight REAL,
-            reason TEXT,
-            UNIQUE(index_id, ticker, event_type, implementation_date),
+            change REAL,
+            PRIMARY KEY(index_id, symbol, event_type, start_date, end_date),
             FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
         )
         ''')
         
-        # Create rebalance calendar table
+        # Create cached_responses table for Bloomberg/data provider caching
         self.cursor.execute('''
-        CREATE TABLE IF NOT EXISTS rebalance_calendar (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            index_id TEXT NOT NULL,
-            event_type TEXT NOT NULL,
-            announcement_date TEXT,
-            implementation_date TEXT NOT NULL,
-            description TEXT,
-            UNIQUE(index_id, event_type, implementation_date),
-            FOREIGN KEY(index_id) REFERENCES index_metadata(index_id)
+        CREATE TABLE IF NOT EXISTS cached_responses (
+            request_hash TEXT PRIMARY KEY,
+            request_type TEXT NOT NULL,
+            request_params TEXT NOT NULL,
+            response_data BLOB,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
         ''')
         
