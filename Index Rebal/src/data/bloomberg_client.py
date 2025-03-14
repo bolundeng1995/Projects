@@ -294,81 +294,34 @@ class BloombergClient:
             return self._get_sample_eqs_results(query)
         
         try:
-            import blpapi
+            # Use pdblp's bdh method with specific EQS formatting
+            eqs_ticker = f"EQS({query})" 
+            logger.debug(f"Trying with EQS ticker format: {eqs_ticker}")
             
-            # Create a simple session
-            session = blpapi.Session()
-            if not session.start():
-                logger.error("Failed to start Bloomberg API session")
-                return self._get_sample_eqs_results(query)
+            # Get securities using format that works for pdblp
+            screen_data = self.bbg.ref(
+                tickers=[eqs_ticker],
+                flds=["SECURITIES"]
+            )
             
-            # Open the reference data service
-            if not session.openService("//blp/refdata"):
-                logger.error("Failed to open Bloomberg reference data service")
-                session.stop()
-                return self._get_sample_eqs_results(query)
-            
-            # Get the service
-            refDataService = session.getService("//blp/refdata")
-            
-            # Create the request - use BsrchRequest for ad-hoc queries instead of BeqsRequest
-            request = refDataService.createRequest("BsrchRequest")
-            
-            # For BsrchRequest, we need to use "query" parameter, not "screenName"
-            request.set("query", query)
-            
-            # No need for screenType parameter with BsrchRequest
-            
-            # Send the request
-            logger.debug(f"Sending Bloomberg BsrchRequest: {query}")
-            session.sendRequest(request)
-            
-            # Process the response
             tickers = []
-            timeout = 10.0  # 10 seconds timeout
-            start_time = time.time()
+            if not screen_data.empty and "SECURITIES" in screen_data.columns:
+                securities = screen_data["SECURITIES"].iloc[0]
+                if isinstance(securities, list):
+                    tickers = securities
+                elif isinstance(securities, str):
+                    tickers = securities.split()
             
-            while True:
-                event = session.nextEvent(500)
-                eventType = event.eventType()
-                
-                if eventType == blpapi.Event.RESPONSE:
-                    # Final response - process it
-                    for msg in event:
-                        # BsrchRequest returns results in a different format than BeqsRequest
-                        if msg.hasElement("results"):
-                            results = msg.getElement("results")
-                            for i in range(results.numValues()):
-                                result = results.getValue(i)
-                                if result.hasElement("security"):
-                                    ticker = result.getElementAsString("security")
-                                    tickers.append(ticker)
-                    break
-                
-                elif eventType == blpapi.Event.PARTIAL_RESPONSE:
-                    # Process partial response
-                    for msg in event:
-                        if msg.hasElement("results"):
-                            results = msg.getElement("results")
-                            for i in range(results.numValues()):
-                                result = results.getValue(i)
-                                if result.hasElement("security"):
-                                    ticker = result.getElementAsString("security")
-                                    tickers.append(ticker)
-                
-                # Check for timeout
-                if (time.time() - start_time) > timeout:
-                    logger.warning("Timeout waiting for Bloomberg response")
-                    break
+            logger.info(f"EQS query returned {len(tickers)} results using pdblp")
             
-            # Clean up
-            session.stop()
-            
-            logger.info(f"EQS query returned {len(tickers)} results")
-            
-            # If still no results, use sample data
+            # If that approach didn't work, try blpapi directly
             if not tickers:
-                logger.warning("No results from Bloomberg EQS query - using sample data")
+                logger.warning("First approach returned no results, trying direct blpapi...")
+                tickers = self._execute_eqs_query_blpapi(query)
+            
+            # If we still have no results, use sample data for testing
+            if not tickers:
+                logger.warning("No results from any Bloomberg EQS approach - using sample data")
                 tickers = self._get_sample_eqs_results(query)
             
             # Save to cache
@@ -381,6 +334,107 @@ class BloombergClient:
             logger.error(f"Error executing EQS query: {e}", exc_info=True)
             # Return sample data so the process can continue
             return self._get_sample_eqs_results(query)
+
+    def _execute_eqs_query_blpapi(self, query):
+        """Execute EQS query using direct blpapi approach"""
+        try:
+            import blpapi
+            
+            # Create session
+            session = blpapi.Session()
+            if not session.start():
+                logger.error("Failed to start Bloomberg API session")
+                return []
+            
+            # Open the exrsvc service instead of refdata
+            if not session.openService("//blp/exrsvc"):
+                logger.error("Failed to open Bloomberg exrsvc service")
+                session.stop()
+                return []
+            
+            # Get the service
+            exrService = session.getService("//blp/exrsvc")
+            
+            # Create request for ExcelGetGridRequest which works for ad-hoc EQS queries
+            request = exrService.createRequest("ExcelGetGridRequest")
+            
+            # Set up the request parameters for equity screening
+            request.set("Domain", "Equity Screening")
+            
+            # Add grid properties with the formula (query)
+            gridProperties = request.getElement("Properties")
+            gridProperties.setElement("SecId", "SCREEN")
+            
+            # Add the actual EQS expression/query
+            formulaElement = gridProperties.getElement("Formula")
+            formulaElement.setElement("Formula", query)
+            
+            # Send the request
+            logger.debug(f"Sending Bloomberg Excel screen request with query: {query}")
+            session.sendRequest(request)
+            
+            # Process the response
+            tickers = []
+            timeout = 15.0  # 15 seconds timeout
+            start_time = time.time()
+            
+            while True:
+                event = session.nextEvent(500)
+                eventType = event.eventType()
+                
+                if eventType == blpapi.Event.RESPONSE:
+                    # Final response
+                    for msg in event:
+                        if msg.hasElement("DataGrids"):
+                            dataGrids = msg.getElement("DataGrids")
+                            
+                            for i in range(dataGrids.numValues()):
+                                dataGrid = dataGrids.getValue(i)
+                                
+                                if dataGrid.hasElement("SecurityData"):
+                                    securityData = dataGrid.getElement("SecurityData")
+                                    
+                                    for j in range(securityData.numValues()):
+                                        security = securityData.getValue(j)
+                                        
+                                        if security.hasElement("Security"):
+                                            ticker = security.getElementAsString("Security")
+                                            tickers.append(ticker)
+                    break
+                
+                elif eventType == blpapi.Event.PARTIAL_RESPONSE:
+                    # Process partial response in the same way
+                    for msg in event:
+                        if msg.hasElement("DataGrids"):
+                            dataGrids = msg.getElement("DataGrids")
+                            
+                            for i in range(dataGrids.numValues()):
+                                dataGrid = dataGrids.getValue(i)
+                                
+                                if dataGrid.hasElement("SecurityData"):
+                                    securityData = dataGrid.getElement("SecurityData")
+                                    
+                                    for j in range(securityData.numValues()):
+                                        security = securityData.getValue(j)
+                                        
+                                        if security.hasElement("Security"):
+                                            ticker = security.getElementAsString("Security")
+                                            tickers.append(ticker)
+                
+                # Check for timeout
+                if (time.time() - start_time) > timeout:
+                    logger.warning("Timeout waiting for Bloomberg response")
+                    break
+            
+            # Clean up
+            session.stop()
+            
+            logger.info(f"EQS query returned {len(tickers)} results using direct blpapi")
+            return tickers
+        
+        except Exception as e:
+            logger.error(f"Error in direct blpapi EQS query: {e}", exc_info=True)
+            return []
 
     def _simplify_query(self, query):
         """
