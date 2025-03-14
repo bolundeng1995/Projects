@@ -311,22 +311,22 @@ class BloombergClient:
             # Get the service
             refDataService = session.getService("//blp/refdata")
             
-            # Create the request
-            request = refDataService.createRequest("BeqsRequest")
+            # Create the request - use BsrchRequest for ad-hoc queries instead of BeqsRequest
+            request = refDataService.createRequest("BsrchRequest")
             
-            # Add the query
-            request.set("screenName", query)
+            # For BsrchRequest, we need to use "query" parameter, not "screenName"
+            request.set("query", query)
             
-            # Set screening options
-            request.set("screenType", "PRIVATE")
+            # No need for screenType parameter with BsrchRequest
             
             # Send the request
+            logger.debug(f"Sending Bloomberg BsrchRequest: {query}")
             session.sendRequest(request)
             
             # Process the response
             tickers = []
             timeout = 10.0  # 10 seconds timeout
-            start_time = time.time()  # Use Python's time module
+            start_time = time.time()
             
             while True:
                 event = session.nextEvent(500)
@@ -335,30 +335,28 @@ class BloombergClient:
                 if eventType == blpapi.Event.RESPONSE:
                     # Final response - process it
                     for msg in event:
-                        if msg.hasElement("securityData"):
-                            securityData = msg.getElement("securityData")
-                            
-                            for i in range(securityData.numValues()):
-                                security = securityData.getValue(i)
-                                if security.hasElement("security"):
-                                    ticker = security.getElementAsString("security")
+                        # BsrchRequest returns results in a different format than BeqsRequest
+                        if msg.hasElement("results"):
+                            results = msg.getElement("results")
+                            for i in range(results.numValues()):
+                                result = results.getValue(i)
+                                if result.hasElement("security"):
+                                    ticker = result.getElementAsString("security")
                                     tickers.append(ticker)
-                    
                     break
                 
                 elif eventType == blpapi.Event.PARTIAL_RESPONSE:
                     # Process partial response
                     for msg in event:
-                        if msg.hasElement("securityData"):
-                            securityData = msg.getElement("securityData")
-                            
-                            for i in range(securityData.numValues()):
-                                security = securityData.getValue(i)
-                                if security.hasElement("security"):
-                                    ticker = security.getElementAsString("security")
+                        if msg.hasElement("results"):
+                            results = msg.getElement("results")
+                            for i in range(results.numValues()):
+                                result = results.getValue(i)
+                                if result.hasElement("security"):
+                                    ticker = result.getElementAsString("security")
                                     tickers.append(ticker)
                 
-                # Check for timeout using Python's time module
+                # Check for timeout
                 if (time.time() - start_time) > timeout:
                     logger.warning("Timeout waiting for Bloomberg response")
                     break
@@ -368,7 +366,7 @@ class BloombergClient:
             
             logger.info(f"EQS query returned {len(tickers)} results")
             
-            # If we got no results but should have, use sample data for testing
+            # If still no results, use sample data
             if not tickers:
                 logger.warning("No results from Bloomberg EQS query - using sample data")
                 tickers = self._get_sample_eqs_results(query)
