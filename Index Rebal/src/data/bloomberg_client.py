@@ -14,6 +14,7 @@ import sqlite3
 import hashlib
 import json
 import pickle
+import time  # Use Python's time module
 
 logger = logging.getLogger(__name__)
 
@@ -324,8 +325,8 @@ class BloombergClient:
             
             # Process the response
             tickers = []
-            timeout = 10000  # 10 seconds timeout
-            startTime = blpapi.Event.timeReceived()
+            timeout = 10.0  # 10 seconds timeout
+            start_time = time.time()  # Use Python's time module
             
             while True:
                 event = session.nextEvent(500)
@@ -357,8 +358,8 @@ class BloombergClient:
                                     ticker = security.getElementAsString("security")
                                     tickers.append(ticker)
                 
-                # Check for timeout
-                if (blpapi.Event.timeReceived() - startTime) > timeout:
+                # Check for timeout using Python's time module
+                if (time.time() - start_time) > timeout:
                     logger.warning("Timeout waiting for Bloomberg response")
                     break
             
