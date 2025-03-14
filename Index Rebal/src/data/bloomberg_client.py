@@ -268,3 +268,55 @@ class BloombergClient:
         if self.conn:
             self.conn.close()
             self.conn = None 
+
+    def execute_eqs_query(self, query):
+        """
+        Execute an Equity Screen (EQS) query on Bloomberg using pdblp
+        
+        Args:
+            query: EQS query string (e.g. "CNTRY_OF_DOMICILE='US' AND MARKET_CAP>1000000000")
+            
+        Returns:
+            List of Bloomberg securities that match the query
+        """
+        logger.info(f"Executing EQS query: {query}")
+        
+        # Check cache first
+        cache_params = {'query': query}
+        cached_data = self._get_from_cache('eqs_query', **cache_params)
+        if cached_data is not None:
+            return cached_data
+        
+        try:
+            # Format the query for Bloomberg EQS
+            eqs_ticker = f"EQS|{query}"  # Bloomberg EQS format
+            
+            # Execute the screen using pdblp's ref() function
+            screen_result = self.bbg.ref(
+                tickers=[eqs_ticker],
+                flds=["SECURITIES"]  # This field returns the matching securities
+            )
+            
+            tickers = []
+            if not screen_result.empty and "SECURITIES" in screen_result.columns:
+                securities_data = screen_result["SECURITIES"][0]
+                
+                # Process the returned securities data
+                if isinstance(securities_data, str):
+                    # Sometimes returned as a single string with delimiters
+                    tickers = securities_data.split()
+                elif isinstance(securities_data, list):
+                    # Sometimes returned as a list
+                    tickers = securities_data
+            
+            logger.info(f"EQS query returned {len(tickers)} results")
+            
+            # Save to cache
+            self._save_to_cache('eqs_query', tickers, **cache_params)
+            
+            return tickers
+        
+        except Exception as e:
+            logger.error(f"Error executing EQS query: {e}")
+            # Return empty list on error
+            return [] 
