@@ -318,8 +318,14 @@ class BloombergClient:
             # Set the screen name to the saved screen
             request.set("screenName", screen_name)
             
-            # Set screen type to PUBLIC for saved screens
-            request.set("screenType", "PUBLIC")
+            # Set screen type - use GLOBAL instead of PUBLIC for a commonly accessible screen
+            # If that doesn't work, try without setting the screenType at all
+            try:
+                request.set("screenType", "GLOBAL")
+            except Exception as e:
+                logger.warning(f"Error setting screen type to GLOBAL: {e}")
+                # Don't set screen type at all, let Bloomberg use default
+                pass
             
             # Send the request
             logger.info(f"Sending request for saved Bloomberg screen: {screen_name}")
@@ -372,10 +378,36 @@ class BloombergClient:
             
             logger.info(f"Bloomberg screen returned {len(tickers)} results")
             
-            # If we still got no results, use sample data for testing
+            # If we still got no results, try using pdblp instead
             if not tickers:
-                logger.warning("No results from Bloomberg screen - using sample data")
-                tickers = self._get_sample_eqs_results(query)
+                logger.warning("No results from direct Bloomberg API - trying pdblp")
+                try:
+                    # Try using pdblp which might have a different way of accessing screens
+                    screen_override = [('SCREEN_NAME', screen_name)]
+                    
+                    # Get data from pdblp, which might handle saved screens differently
+                    screen_result = self.bbg.bdp(
+                        ['EQSS'],  # EQSS = Equity Screen Service
+                        ['RESULTS'],
+                        overrides=screen_override
+                    )
+                    
+                    if not screen_result.empty and 'results' in screen_result.columns:
+                        result_str = screen_result['results'].iloc[0]
+                        if isinstance(result_str, str):
+                            tickers = result_str.split()
+                        elif isinstance(result_str, list):
+                            tickers = result_str
+                    
+                    logger.info(f"pdblp approach returned {len(tickers)} results")
+                    
+                    # If still no results, use sample data
+                    if not tickers:
+                        logger.warning("No results from pdblp - using sample data")
+                        tickers = self._get_sample_eqs_results(query)
+                except Exception as e:
+                    logger.error(f"Error with pdblp approach: {e}")
+                    tickers = self._get_sample_eqs_results(query)
             
             # Save to cache
             if tickers:

@@ -124,7 +124,7 @@ def fetch_price_data_for_ticker(client, ticker, start_date, end_date, fields):
     
     try:
         # Ensure we're requesting all required fields
-        required_fields = ['OPEN', 'HIGH', 'LOW', 'PX_LAST', 'VOLUME']
+        required_fields = ['OPEN', 'HIGH', 'LOW', 'PX_LAST', 'VOLUME', 'DAY_TO_DAY_TOT_RETURN_GROSS_DVDS']
         
         # Check if all required fields are included in the request
         field_list = fields.split(',') if isinstance(fields, str) else fields
@@ -222,7 +222,7 @@ def import_price_data_to_db(db, df, overwrite=False):
         return 0
     
     # Ensure we have all required columns
-    required_cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume']
+    required_cols = ['ticker', 'date', 'open', 'high', 'low', 'close', 'volume', 'return']
     missing_cols = [col for col in required_cols if col not in df.columns]
     
     if missing_cols:

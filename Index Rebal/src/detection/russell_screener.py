@@ -127,12 +127,7 @@ class RussellEligibilityScreener(BaseScanner):
         
         # Use Bloomberg EQS to get all US-listed equities
         # Per Russell methodology, securities must be listed on eligible US exchanges
-        eqs_query = "CNTRY_OF_DOMICILE='US' AND " + \
-                   "EXCH_CODE IN ('US', 'UN', 'UW', 'UP', 'UA') AND " + \
-                   "SECURITY_TYP='Common Stock'"
-        
-        # Get tickers from EQS
-        tickers = self.bbg.execute_eqs_query(eqs_query)
+        tickers = self.bbg.execute_eqs_query(screen_name="RUSSELL UNIVERSE")
         
         if not tickers:
             self.logger.error("Failed to retrieve US equity universe")

@@ -195,7 +195,7 @@ class FileBasedConstituentProvider:
         try:
             # Read the constituent file
             # Assuming a standard format - adjust parsing logic as needed for your files
-            df = pd.read_csv(file_path, delimiter='\t')
+            df = pd.read_csv(file_path, delimiter='|', skiprows=1).iloc[:-1]
             
             # Standard field mapping - adjust based on your file format
             field_mapping = {
