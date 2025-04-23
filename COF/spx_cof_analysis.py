@@ -157,26 +157,36 @@ class SPXCOFAnalyzer:
                 
                 # Plot COF deviation vs each liquidity indicator
                 fig, axes = plt.subplots(3, 1, figsize=(15, 15))
-                fig.suptitle('COF Deviation vs Liquidity Indicators', fontsize=16)
+                fig.suptitle('COF Deviation vs Liquidity Indicators (Normalized)', fontsize=16)
                 
                 for idx, indicator in enumerate(['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']):
                     ax1 = axes[idx]
                     ax2 = ax1.twinx()
                     
-                    # Plot COF deviation as line
+                    # Normalize the data
+                    cof_deviation = self.liquidity_analysis['analysis_data']['cof_deviation']
+                    liquidity_indicator = self.liquidity_analysis['analysis_data'][indicator]
+                    
+                    cof_normalized = (cof_deviation - cof_deviation.mean()) / cof_deviation.std()
+                    liquidity_normalized = (liquidity_indicator - liquidity_indicator.mean()) / liquidity_indicator.std()
+                    
+                    # Plot normalized COF deviation as line
                     line = ax1.plot(self.liquidity_analysis['analysis_data'].index, 
-                                  self.liquidity_analysis['analysis_data']['cof_deviation'],
+                                  cof_normalized,
                                   label='COF Deviation', color='blue')
                     
-                    # Plot liquidity indicator as bars
+                    # Add horizontal line at y=0
+                    ax1.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+                    
+                    # Plot normalized liquidity indicator as bars
                     bars = ax2.bar(self.liquidity_analysis['analysis_data'].index,
-                                 self.liquidity_analysis['analysis_data'][indicator],
+                                 liquidity_normalized,
                                  label=indicator, color='red', alpha=0.3)
                     
                     # Set labels and title
-                    ax1.set_ylabel('COF Deviation', color='blue')
-                    ax2.set_ylabel(indicator, color='red')
-                    ax1.set_title(f'COF Deviation vs {indicator}')
+                    ax1.set_ylabel('Normalized COF Deviation', color='blue')
+                    ax2.set_ylabel(f'Normalized {indicator}', color='red')
+                    ax1.set_title(f'Normalized COF Deviation vs {indicator}')
                     
                     # Add legends
                     lines1, labels1 = ax1.get_legend_handles_labels()
