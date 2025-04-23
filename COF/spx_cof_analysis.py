@@ -143,7 +143,7 @@ class SPXCOFAnalyzer:
                 
                 for indicator in ['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']:
                     plt.plot(self.liquidity_analysis['analysis_data'].index, 
-                            self.liquidity_analysis['rolling_correlation'].loc[:, ('cof_deviation', indicator)],
+                            self.liquidity_analysis['rolling_correlation'].xs('cof_deviation', level=1)[indicator],
                             label=f'COF Deviation vs {indicator}')
                 
                 plt.title('Rolling Correlation: COF Deviation vs Liquidity Indicators')
@@ -154,6 +154,40 @@ class SPXCOFAnalyzer:
                 # Print correlation matrix
                 print("\nCorrelation Matrix (COF Deviation vs Liquidity Indicators):")
                 print(self.liquidity_analysis['correlation'].round(3))
+                
+                # Plot COF deviation vs each liquidity indicator
+                fig, axes = plt.subplots(3, 1, figsize=(15, 15))
+                fig.suptitle('COF Deviation vs Liquidity Indicators', fontsize=16)
+                
+                for idx, indicator in enumerate(['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']):
+                    ax1 = axes[idx]
+                    ax2 = ax1.twinx()
+                    
+                    # Plot COF deviation as line
+                    line = ax1.plot(self.liquidity_analysis['analysis_data'].index, 
+                                  self.liquidity_analysis['analysis_data']['cof_deviation'],
+                                  label='COF Deviation', color='blue')
+                    
+                    # Plot liquidity indicator as bars
+                    bars = ax2.bar(self.liquidity_analysis['analysis_data'].index,
+                                 self.liquidity_analysis['analysis_data'][indicator],
+                                 label=indicator, color='red', alpha=0.3)
+                    
+                    # Set labels and title
+                    ax1.set_ylabel('COF Deviation', color='blue')
+                    ax2.set_ylabel(indicator, color='red')
+                    ax1.set_title(f'COF Deviation vs {indicator}')
+                    
+                    # Add legends
+                    lines1, labels1 = ax1.get_legend_handles_labels()
+                    lines2, labels2 = ax2.get_legend_handles_labels()
+                    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+                    
+                    # Add grid
+                    ax1.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                plt.show()
             
         except Exception as e:
             logger.error(f"Error plotting results: {str(e)}")
