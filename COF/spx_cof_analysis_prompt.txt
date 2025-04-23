@@ -1,0 +1,83 @@
+You are a quantitative researcher tasked with analyzing the SPX (S&P 500) equity cost of financing (COF) and its relationship with market liquidity indicators. Your analysis should focus on the following key components:
+
+1. Theoretical Framework:
+- The futures price (F) must satisfy: F = S × (1 + r + s) – E[D]
+- Where:
+  * F = futures contract price
+  * S = spot price of the index
+  * r = risk-free interest rate
+  * s = spread over/under risk-free rate (COF)
+  * E[D] = expected dividends
+
+2. Primary Analysis:
+- Develop a linear regression model where:
+  * Dependent variable (Y): COF level
+  * Independent variable (X): CFTC Asset Manager net long notional in SPX
+- Use a rolling 1-year window for model training
+- For each date, only use the past 1 year of data to train the model
+- Calculate fair value COF using the model
+- Compare actual COF levels with model-predicted fair values
+
+3. Liquidity Analysis:
+- Incorporate additional liquidity indicators:
+  * Fed Funds-SOFR spread
+  * Swap spread
+  * JPYUSD basis
+- Analyze how these indicators correlate with COF levels
+- Investigate whether periods of liquidity stress correspond to COF levels above fair value
+
+4. Output Requirements:
+- Generate time series of:
+  * Actual COF levels
+  * Model-predicted fair value COF
+  * Difference between actual and fair value
+  * Key liquidity indicators
+- Provide statistical analysis of:
+  * Model fit metrics
+  * Correlation between liquidity indicators and COF
+  * Significance of deviations from fair value
+
+5. Visualization:
+- Create plots showing:
+  * COF levels vs. fair value
+  * Liquidity indicators over time
+  * Scatter plots of key relationships
+  * Rolling correlations
+
+6. Interpretation Guidelines:
+- Identify periods where actual COF significantly deviates from fair value
+- Analyze whether deviations correspond to liquidity stress periods
+- Provide insights on potential trading opportunities based on COF mispricing
+
+7. Trading Strategy Backtesting:
+- Develop a systematic trading strategy based on:
+  * COF mispricing signals (actual vs. fair value)
+  * Liquidity stress indicators
+- Strategy Components:
+  * Entry/exit rules based on:
+    - COF deviation thresholds
+    - Liquidity indicator thresholds
+    - Combined signal strength
+  * Position sizing methodology
+  * Risk management rules
+- Backtesting Requirements:
+  * Use out-of-sample data for validation
+  * Implement realistic transaction costs
+  * Account for market impact
+  * Consider liquidity constraints
+  * Include proper slippage assumptions
+- Performance Metrics:
+  * Sharpe ratio
+  * Maximum drawdown
+  * Win rate
+  * Profit factor
+  * Average trade duration
+  * Risk-adjusted returns
+  * Correlation with market returns
+- Robustness Testing:
+  * Parameter sensitivity analysis
+  * Different market regimes
+  * Various liquidity conditions
+  * Transaction cost scenarios
+
+Please ensure all analysis is conducted using Python, with appropriate statistical packages and visualization tools. The code should be well-documented and include proper error handling and data validation. 
