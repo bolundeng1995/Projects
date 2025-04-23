@@ -188,18 +188,17 @@ class SPXCOFAnalyzer:
                     ax2.set_ylabel(indicator, color='red')
                     ax1.set_title(f'COF Deviation vs {indicator}')
                     
-                    # Align y-axes at y=0
+                    # Align y-axes at y=0 with symmetric limits
                     y1_min, y1_max = ax1.get_ylim()
                     y2_min, y2_max = ax2.get_ylim()
                     
-                    # Calculate the ratio of the ranges
-                    y1_range = y1_max - y1_min
-                    y2_range = y2_max - y2_min
-                    ratio = y1_range / y2_range
+                    # Find the maximum absolute value for each axis
+                    y1_abs_max = max(abs(y1_min), abs(y1_max))
+                    y2_abs_max = max(abs(y2_min), abs(y2_max))
                     
-                    # Set the limits to maintain the ratio but align at 0
-                    ax1.set_ylim(y1_min, y1_max)
-                    ax2.set_ylim(y2_min * ratio, y2_max * ratio)
+                    # Set symmetric limits around zero
+                    ax1.set_ylim(-y1_abs_max, y1_abs_max)
+                    ax2.set_ylim(-y2_abs_max, y2_abs_max)
                     
                     # Add legends
                     lines1, labels1 = ax1.get_legend_handles_labels()
