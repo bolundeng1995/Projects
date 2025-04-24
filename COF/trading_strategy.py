@@ -133,6 +133,7 @@ class COFTradingStrategy:
             entry_price = 0
             entry_date = None
             cumulative_pnl = 0
+            base_capital = self.initial_capital
             
             for i in range(1, len(self.cof_data)):
                 signal = self.cof_data['signal'].iloc[i]
@@ -144,12 +145,14 @@ class COFTradingStrategy:
                     unrealized_pnl = current_position * (price - entry_price)
                     self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = unrealized_pnl
                     
+                    # Update capital to include unrealized PnL
+                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital + unrealized_pnl
+                    
                     # Check for stop loss
                     if unrealized_pnl <= -max_loss:
                         # Exit position due to stop loss
-                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
-                            self.positions['capital'].iloc[i-1] + unrealized_pnl
-                        )
+                        base_capital += unrealized_pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
                         self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
                         self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = unrealized_pnl
                         cumulative_pnl += unrealized_pnl
@@ -174,16 +177,14 @@ class COFTradingStrategy:
                     
                     # Apply transaction cost
                     cost = abs(current_position) * price * transaction_cost
-                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
-                        self.positions['capital'].iloc[i-1] - cost
-                    )
+                    base_capital -= cost
+                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
                     
                 elif signal == 0 and current_position != 0:
                     # Exit position
                     pnl = current_position * (price - entry_price)
-                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
-                        self.positions['capital'].iloc[i-1] + pnl
-                    )
+                    base_capital += pnl
+                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
                     self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
                     self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = pnl
                     cumulative_pnl += pnl
@@ -199,9 +200,7 @@ class COFTradingStrategy:
                 else:
                     # Maintain current position
                     self.positions.iloc[i, self.positions.columns.get_loc('position')] = current_position
-                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
-                        self.positions['capital'].iloc[i-1]
-                    )
+                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
             
             # Save detailed trading information to CSV
             self.positions.to_csv('trading_results.csv')
