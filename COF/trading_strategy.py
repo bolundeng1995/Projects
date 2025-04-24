@@ -34,19 +34,26 @@ class COFTradingStrategy:
         self.portfolio_value = None
         
     def calculate_liquidity_stress(self):
-        """Calculate a composite liquidity stress indicator"""
+        """Calculate a composite liquidity stress indicator using rolling 1-year windows"""
         try:
-            # Normalize each liquidity indicator
+            # Normalize each liquidity indicator using rolling 1-year windows
             normalized_indicators = pd.DataFrame()
+            window_size = 52  # 1 year of trading weeks
+            
             for col in self.liquidity_data.columns:
+                # Calculate rolling mean and std (using shift to look forward since data is in descending order)
+                rolling_mean = self.liquidity_data[col].rolling(window=window_size, min_periods=1).mean()
+                rolling_std = self.liquidity_data[col].rolling(window=window_size, min_periods=1).std()
+                
+                # Calculate z-score using rolling statistics
                 normalized_indicators[col] = (
-                    self.liquidity_data[col] - self.liquidity_data[col].mean()
-                ) / self.liquidity_data[col].std()
+                    self.liquidity_data[col] - rolling_mean
+                ) / rolling_std
             
             # Calculate composite stress indicator (equal weights)
             self.liquidity_data['liquidity_stress'] = normalized_indicators.mean(axis=1)
             
-            logger.info("Liquidity stress indicator calculated successfully")
+            logger.info("Liquidity stress indicator calculated successfully using rolling 1-year windows")
             
         except Exception as e:
             logger.error(f"Error calculating liquidity stress: {str(e)}")
