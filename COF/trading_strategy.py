@@ -104,7 +104,7 @@ class COFTradingStrategy:
             logger.error(f"Error generating signals: {str(e)}")
             raise
     
-    def backtest(self, transaction_cost=0.0001):
+    def backtest(self, transaction_cost=0.0001, max_loss=50):
         """
         Backtest the trading strategy
         
@@ -112,6 +112,8 @@ class COFTradingStrategy:
         -----------
         transaction_cost : float
             Transaction cost as a fraction of trade value
+        max_loss : float
+            Maximum loss in absolute price terms (e.g., 50 points)
         """
         try:
             # Initialize portfolio tracking
@@ -126,6 +128,18 @@ class COFTradingStrategy:
             for i in range(1, len(self.cof_data)):
                 signal = self.cof_data['signal'].iloc[i]
                 price = self.cof_data['futures_price'].iloc[i]
+                
+                # Check for stop loss if in a position
+                if current_position != 0:
+                    pnl = current_position * (price - entry_price)
+                    if pnl <= -max_loss:
+                        # Exit position due to stop loss
+                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
+                            self.positions['capital'].iloc[i-1] + pnl
+                        )
+                        current_position = 0
+                        entry_price = 0
+                        continue
                 
                 # Update position
                 if signal != 0 and current_position == 0:
