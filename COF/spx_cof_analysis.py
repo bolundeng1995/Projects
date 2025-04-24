@@ -226,6 +226,23 @@ def main():
     analyzer.train_model()
     analyzer.analyze_liquidity()
     analyzer.plot_results()
+    
+    # Save results back to Excel
+    try:
+        # Create a copy of the original data
+        results_data = analyzer.data.copy()
+        
+        # Add predicted COF and deviation
+        results_data['cof_predicted'] = analyzer.model_results['cof_predicted']
+        results_data['cof_deviation'] = analyzer.model_results['cof_deviation']
+        
+        # Save to Excel
+        results_data.to_excel('COF_DATA.xlsx')
+        logger.info("Analysis results saved to COF_DATA.xlsx")
+        
+    except Exception as e:
+        logger.error(f"Error saving results to Excel: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main() 

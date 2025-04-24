@@ -243,6 +243,7 @@ def main():
     
     # Initialize and run strategy
     strategy = COFTradingStrategy(cof_data, liquidity_data)
+    strategy.calculate_liquidity_stress()
     strategy.generate_signals()
     strategy.backtest()
     strategy.plot_results()
