@@ -123,6 +123,7 @@ class COFTradingStrategy:
             self.positions['entry_price'] = 0.0
             self.positions['exit_price'] = 0.0
             self.positions['pnl'] = 0.0
+            self.positions['unrealized_pnl'] = 0.0
             self.positions['cumulative_pnl'] = 0.0
             self.positions['trade_duration'] = 0
             self.positions['exit_reason'] = ''
@@ -138,17 +139,20 @@ class COFTradingStrategy:
                 price = self.cof_data['futures_price'].iloc[i]
                 current_date = self.cof_data.index[i]
                 
-                # Check for stop loss if in a position
+                # Calculate unrealized PnL if in a position
                 if current_position != 0:
-                    pnl = current_position * (price - entry_price)
-                    if pnl <= -max_loss:
+                    unrealized_pnl = current_position * (price - entry_price)
+                    self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = unrealized_pnl
+                    
+                    # Check for stop loss
+                    if unrealized_pnl <= -max_loss:
                         # Exit position due to stop loss
                         self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
-                            self.positions['capital'].iloc[i-1] + pnl
+                            self.positions['capital'].iloc[i-1] + unrealized_pnl
                         )
                         self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
-                        self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = pnl
-                        cumulative_pnl += pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = unrealized_pnl
+                        cumulative_pnl += unrealized_pnl
                         self.positions.iloc[i, self.positions.columns.get_loc('cumulative_pnl')] = cumulative_pnl
                         self.positions.iloc[i, self.positions.columns.get_loc('exit_reason')] = 'stop_loss'
                         self.positions.iloc[i, self.positions.columns.get_loc('trade_duration')] = (
