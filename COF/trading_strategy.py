@@ -120,14 +120,23 @@ class COFTradingStrategy:
             self.positions = pd.DataFrame(index=self.cof_data.index)
             self.positions['position'] = 0
             self.positions['capital'] = self.initial_capital
+            self.positions['entry_price'] = 0.0
+            self.positions['exit_price'] = 0.0
+            self.positions['pnl'] = 0.0
+            self.positions['cumulative_pnl'] = 0.0
+            self.positions['trade_duration'] = 0
+            self.positions['exit_reason'] = ''
             
             # Track trades
             current_position = 0
             entry_price = 0
+            entry_date = None
+            cumulative_pnl = 0
             
             for i in range(1, len(self.cof_data)):
                 signal = self.cof_data['signal'].iloc[i]
                 price = self.cof_data['futures_price'].iloc[i]
+                current_date = self.cof_data.index[i]
                 
                 # Check for stop loss if in a position
                 if current_position != 0:
@@ -137,8 +146,17 @@ class COFTradingStrategy:
                         self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
                             self.positions['capital'].iloc[i-1] + pnl
                         )
+                        self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
+                        self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = pnl
+                        cumulative_pnl += pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('cumulative_pnl')] = cumulative_pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('exit_reason')] = 'stop_loss'
+                        self.positions.iloc[i, self.positions.columns.get_loc('trade_duration')] = (
+                            current_date - entry_date
+                        ).days
                         current_position = 0
                         entry_price = 0
+                        entry_date = None
                         continue
                 
                 # Update position
@@ -146,7 +164,9 @@ class COFTradingStrategy:
                     # Enter new position
                     current_position = signal
                     entry_price = price
+                    entry_date = current_date
                     self.positions.iloc[i, self.positions.columns.get_loc('position')] = current_position
+                    self.positions.iloc[i, self.positions.columns.get_loc('entry_price')] = entry_price
                     
                     # Apply transaction cost
                     cost = abs(current_position) * price * transaction_cost
@@ -160,8 +180,17 @@ class COFTradingStrategy:
                     self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
                         self.positions['capital'].iloc[i-1] + pnl
                     )
+                    self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
+                    self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = pnl
+                    cumulative_pnl += pnl
+                    self.positions.iloc[i, self.positions.columns.get_loc('cumulative_pnl')] = cumulative_pnl
+                    self.positions.iloc[i, self.positions.columns.get_loc('exit_reason')] = 'signal'
+                    self.positions.iloc[i, self.positions.columns.get_loc('trade_duration')] = (
+                        current_date - entry_date
+                    ).days
                     current_position = 0
                     entry_price = 0
+                    entry_date = None
                     
                 else:
                     # Maintain current position
@@ -169,6 +198,10 @@ class COFTradingStrategy:
                     self.positions.iloc[i, self.positions.columns.get_loc('capital')] = (
                         self.positions['capital'].iloc[i-1]
                     )
+            
+            # Save detailed trading information to CSV
+            self.positions.to_csv('trading_results.csv')
+            logger.info("Trading results saved to trading_results.csv")
             
             # Calculate performance metrics
             self.calculate_performance_metrics()
