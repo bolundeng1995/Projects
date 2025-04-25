@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class COFTradingStrategy:
-    def __init__(self, cof_data, liquidity_data, initial_capital=1000000):
+    def __init__(self, cof_data, liquidity_data, initial_capital=0):
         """
         Initialize the COF trading strategy
         
@@ -59,14 +59,16 @@ class COFTradingStrategy:
             logger.error(f"Error calculating liquidity stress: {str(e)}")
             raise
     
-    def generate_signals(self, cof_threshold=0.02, liquidity_threshold=0.01):
+    def generate_signals(self, entry_threshold=2.0, exit_threshold=0.5, liquidity_threshold=0.01):
         """
         Generate trading signals based on COF mispricing and liquidity indicators
         
         Parameters:
         -----------
-        cof_threshold : float
-            Threshold for COF deviation to trigger a signal
+        entry_threshold : float
+            Z-score threshold for entering a position (e.g., 2.0 for 2 standard deviations)
+        exit_threshold : float
+            Z-score threshold for exiting a position (e.g., 0.5 for 0.5 standard deviations)
         liquidity_threshold : float
             Threshold for liquidity stress to trigger a signal
         """
@@ -76,6 +78,14 @@ class COFTradingStrategy:
                 self.cof_data['cof_actual'] - self.cof_data['cof_predicted']
             )
             
+            # Calculate rolling z-score of COF deviation
+            window_size = 52  # 1 year of trading weeks
+            rolling_mean = self.cof_data['cof_deviation'].rolling(window=window_size, min_periods=10).mean()
+            rolling_std = self.cof_data['cof_deviation'].rolling(window=window_size, min_periods=10).std()
+            self.cof_data['cof_deviation_zscore'] = (
+                self.cof_data['cof_deviation'] - rolling_mean
+            ) / rolling_std
+            
             # Calculate liquidity stress if not already done
             if 'liquidity_stress' not in self.liquidity_data.columns:
                 self.calculate_liquidity_stress()
@@ -83,22 +93,47 @@ class COFTradingStrategy:
             # Generate signals
             self.cof_data['signal'] = 0
             
-            # Long signal: COF is cheap (negative deviation) and liquidity is normal
+            # Long signal: COF is cheap (negative z-score) and liquidity is normal
             long_condition = (
-                (self.cof_data['cof_deviation'] < -cof_threshold) &
+                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             
-            # Short signal: COF is expensive (positive deviation) and liquidity is normal
+            # Short signal: COF is expensive (positive z-score) and liquidity is normal
             short_condition = (
-                (self.cof_data['cof_deviation'] > cof_threshold) &
+                (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             
+            # Exit conditions
+            long_exit_condition = (
+                (self.cof_data['cof_deviation_zscore'] > -exit_threshold) &
+                (self.cof_data['signal'].shift(1) == 1)  # Only exit if we were long
+            )
+            
+            short_exit_condition = (
+                (self.cof_data['cof_deviation_zscore'] < exit_threshold) &
+                (self.cof_data['signal'].shift(1) == -1)  # Only exit if we were short
+            )
+            
+            # Apply signals
             self.cof_data.loc[long_condition, 'signal'] = 1
             self.cof_data.loc[short_condition, 'signal'] = -1
             
-            logger.info("Trading signals generated successfully")
+            # Maintain positions until exit threshold is crossed
+            for i in range(1, len(self.cof_data)):
+                if self.cof_data['signal'].iloc[i-1] == 1:  # If we were long
+                    if self.cof_data['cof_deviation_zscore'].iloc[i] <= -exit_threshold:  # Only exit if we cross exit threshold
+                        self.cof_data.iloc[i, self.cof_data.columns.get_loc('signal')] = 1
+                elif self.cof_data['signal'].iloc[i-1] == -1:  # If we were short
+                    if self.cof_data['cof_deviation_zscore'].iloc[i] >= exit_threshold:  # Only exit if we cross exit threshold
+                        self.cof_data.iloc[i, self.cof_data.columns.get_loc('signal')] = -1
+            
+            # Apply exit signals
+            self.cof_data.loc[long_exit_condition, 'signal'] = 0
+            self.cof_data.loc[short_exit_condition, 'signal'] = 0
+            
+            logger.info("Trading signals generated successfully using z-scores")
             
         except Exception as e:
             logger.error(f"Error generating signals: {str(e)}")
@@ -137,7 +172,7 @@ class COFTradingStrategy:
             
             for i in range(1, len(self.cof_data)):
                 signal = self.cof_data['signal'].iloc[i]
-                price = self.cof_data['futures_price'].iloc[i]
+                price = self.cof_data['cof_actual'].iloc[i]
                 current_date = self.cof_data.index[i]
                 
                 # Calculate unrealized PnL if in a position
@@ -200,7 +235,13 @@ class COFTradingStrategy:
                 else:
                     # Maintain current position
                     self.positions.iloc[i, self.positions.columns.get_loc('position')] = current_position
-                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
+                    if current_position != 0:
+                        # Include unrealized PnL in capital when maintaining position
+                        unrealized_pnl = current_position * (price - entry_price)
+                        self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = unrealized_pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital + unrealized_pnl
+                    else:
+                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
             
             # Save detailed trading information to CSV
             self.positions.to_csv('trading_results.csv')
@@ -218,25 +259,30 @@ class COFTradingStrategy:
     def calculate_performance_metrics(self):
         """Calculate strategy performance metrics"""
         try:
-            # Calculate returns
-            returns = self.positions['capital'].pct_change()
+            # Calculate net change in capital
+            returns = self.positions['capital'].diff()
             
             # Calculate metrics
-            total_return = (self.positions['capital'].iloc[-1] / self.initial_capital) - 1
-            sharpe_ratio = np.sqrt(252) * returns.mean() / returns.std()
-            max_drawdown = (self.positions['capital'] / self.positions['capital'].cummax() - 1).min()
+            total_return = self.positions['capital'].iloc[-1]
+            sharpe_ratio = np.sqrt(52) * returns.mean() / returns.std()
+            max_drawdown = (self.positions['capital'] - self.positions['capital'].cummax()).min()
             
             # Calculate win rate
-            trades = self.positions['position'].diff().abs() > 0
-            winning_trades = (self.positions['capital'].diff() > 0) & trades
+            trades = self.positions['pnl'] != 0
+            winning_trades = self.positions['pnl'] > 0
             win_rate = winning_trades.sum() / trades.sum()
             
             # Store metrics
             self.metrics = {
+                "num_trades": trades.sum(),
                 'total_return': total_return,
                 'sharpe_ratio': sharpe_ratio,
                 'max_drawdown': max_drawdown,
-                'win_rate': win_rate
+                'win_rate': win_rate,
+                'avg_win_pnl': self.positions['pnl'][winning_trades].mean(),
+                'avg_loss_pnl': self.positions['pnl'][~winning_trades].mean(),
+                'avg_win_trade_duration': self.positions['trade_duration'][winning_trades].mean(),
+                'avg_loss_trade_duration': self.positions['trade_duration'][~winning_trades].mean()
             }
             
             logger.info("Performance metrics calculated successfully")
@@ -248,17 +294,40 @@ class COFTradingStrategy:
     def plot_results(self):
         """Plot backtesting results"""
         try:
-            plt.figure(figsize=(15, 10))
+            plt.figure(figsize=(15, 15))
+            
+            # Calculate total capital including unrealized PnL
+            total_capital = self.positions['capital'].copy()
+            for i in range(1, len(self.positions)):
+                if self.positions['position'].iloc[i] != 0:  # If in a position
+                    total_capital.iloc[i] += self.positions['unrealized_pnl'].iloc[i]
             
             # Plot portfolio value
-            plt.subplot(2, 1, 1)
-            plt.plot(self.positions.index, self.positions['capital'], label='Portfolio Value')
+            plt.subplot(3, 1, 1)
+            plt.plot(self.positions.index, total_capital, label='Portfolio Value (with Unrealized PnL)', color='blue')
+            
+            # Highlight trades
+            for i in range(1, len(self.positions)):
+                if self.positions['pnl'].iloc[i] != 0:  # If there's a trade
+                    color = 'green' if self.positions['pnl'].iloc[i] > 0 else 'red'
+                    plt.scatter(self.positions.index[i], total_capital.iloc[i], 
+                              color=color, s=100, alpha=0.5)
+            
             plt.title('Strategy Performance')
             plt.legend()
             plt.grid(True)
             
+            # Plot daily mark-to-market performance
+            plt.subplot(3, 1, 2)
+            daily_returns = total_capital.diff()
+            plt.plot(self.positions.index, daily_returns, label='Daily Returns', color='green')
+            plt.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+            plt.title('Daily Mark-to-Market Performance')
+            plt.legend()
+            plt.grid(True)
+            
             # Plot positions
-            plt.subplot(2, 1, 2)
+            plt.subplot(3, 1, 3)
             plt.plot(self.positions.index, self.positions['position'], label='Position')
             plt.title('Trading Positions')
             plt.legend()
@@ -269,10 +338,15 @@ class COFTradingStrategy:
             
             # Print metrics
             print("\nStrategy Performance Metrics:")
-            print(f"Total Return: {self.metrics['total_return']:.2%}")
+            print(f"Number of Trades: {self.metrics['num_trades']}")
+            print(f"Total Return: {self.metrics['total_return']:.2f}")
             print(f"Sharpe Ratio: {self.metrics['sharpe_ratio']:.2f}")
             print(f"Maximum Drawdown: {self.metrics['max_drawdown']:.2%}")
             print(f"Win Rate: {self.metrics['win_rate']:.2%}")
+            print(f"Average Win PnL: {self.metrics['avg_win_pnl']:.2f}")
+            print(f"Average Loss PnL: {self.metrics['avg_loss_pnl']:.2f}")
+            print(f"Average Win Trade Duration: {self.metrics['avg_win_trade_duration']:.2f} days")
+            print(f"Average Loss Trade Duration: {self.metrics['avg_loss_trade_duration']:.2f} days")
             
         except Exception as e:
             logger.error(f"Error plotting results: {str(e)}")
@@ -285,11 +359,10 @@ def main():
     # Prepare data for strategy
     cof_data = pd.DataFrame({
         'cof_actual': data['cof'],
-        'cof_predicted': data['cof_predicted'],
-        'futures_price': data['futures_price']
+        'cof_predicted': data['cof_predicted']
     })
     
-    liquidity_data = data[['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']]
+    liquidity_data = data[['fed_funds_sofr_spread']]
     
     # Initialize and run strategy
     strategy = COFTradingStrategy(cof_data, liquidity_data)

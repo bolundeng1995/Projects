@@ -141,72 +141,69 @@ class SPXCOFAnalyzer:
                 # Plot rolling correlations between COF deviation and liquidity indicators
                 plt.figure(figsize=(15, 10))
                 
-                for indicator in ['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']:
-                    plt.plot(self.liquidity_analysis['analysis_data'].index, 
-                            self.liquidity_analysis['rolling_correlation'].xs('cof_deviation', level=1)[indicator],
-                            label=f'COF Deviation vs {indicator}')
+                plt.plot(self.liquidity_analysis['analysis_data'].index, 
+                        self.liquidity_analysis['rolling_correlation'].xs('cof_deviation', level=1)['fed_funds_sofr_spread'],
+                        label='COF Deviation vs Fed Funds-SOFR Spread')
                 
-                plt.title('Rolling Correlation: COF Deviation vs Liquidity Indicators')
+                plt.title('Rolling Correlation: COF Deviation vs Fed Funds-SOFR Spread')
                 plt.legend()
                 plt.grid(True)
                 plt.show()
                 
                 # Print correlation matrix
-                print("\nCorrelation Matrix (COF Deviation vs Liquidity Indicators):")
+                print("\nCorrelation Matrix (COF Deviation vs Fed Funds-SOFR Spread):")
                 print(self.liquidity_analysis['correlation'].round(3))
                 
-                # Plot COF deviation vs each liquidity indicator
-                fig, axes = plt.subplots(3, 1, figsize=(15, 15))
-                fig.suptitle('COF Deviation vs Liquidity Indicators (Normalized)', fontsize=16)
+                # Plot COF deviation vs liquidity indicator
+                fig, ax1 = plt.subplots(figsize=(15, 8))
+                fig.suptitle('COF Deviation vs Fed Funds-SOFR Spread (Normalized)', fontsize=16)
                 
-                for idx, indicator in enumerate(['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']):
-                    ax1 = axes[idx]
-                    ax2 = ax1.twinx()
-                    
-                    # Normalize the data
-                    cof_deviation = self.liquidity_analysis['analysis_data']['cof_deviation']
-                    liquidity_indicator = self.liquidity_analysis['analysis_data'][indicator]
-                    
-                    cof_normalized = (cof_deviation - cof_deviation.mean()) / cof_deviation.std()
-                    liquidity_normalized = (liquidity_indicator - liquidity_indicator.mean()) / liquidity_indicator.std()
-                    
-                    # Plot normalized COF deviation as line
-                    line = ax1.plot(self.liquidity_analysis['analysis_data'].index, 
-                                  cof_normalized,
-                                  label='COF Deviation', color='blue')
-                    
-                    # Add horizontal line at y=0
-                    ax1.axhline(y=0, color='black', linestyle='--', alpha=0.3)
-                    
-                    # Plot normalized liquidity indicator as bars
-                    bars = ax2.bar(self.liquidity_analysis['analysis_data'].index,
-                                 liquidity_normalized,
-                                 label=indicator, color='red', alpha=0.3)
-                    
-                    # Set labels and title
-                    ax1.set_ylabel('COF Deviation', color='blue')
-                    ax2.set_ylabel(indicator, color='red')
-                    ax1.set_title(f'COF Deviation vs {indicator}')
-                    
-                    # Align y-axes at y=0 with symmetric limits
-                    y1_min, y1_max = ax1.get_ylim()
-                    y2_min, y2_max = ax2.get_ylim()
-                    
-                    # Find the maximum absolute value for each axis
-                    y1_abs_max = max(abs(y1_min), abs(y1_max))
-                    y2_abs_max = max(abs(y2_min), abs(y2_max))
-                    
-                    # Set symmetric limits around zero
-                    ax1.set_ylim(-y1_abs_max, y1_abs_max)
-                    ax2.set_ylim(-y2_abs_max, y2_abs_max)
-                    
-                    # Add legends
-                    lines1, labels1 = ax1.get_legend_handles_labels()
-                    lines2, labels2 = ax2.get_legend_handles_labels()
-                    ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
-                    
-                    # Add grid
-                    ax1.grid(True, alpha=0.3)
+                ax2 = ax1.twinx()
+                
+                # Normalize the data
+                cof_deviation = self.liquidity_analysis['analysis_data']['cof_deviation']
+                liquidity_indicator = self.liquidity_analysis['analysis_data']['fed_funds_sofr_spread']
+                
+                cof_normalized = (cof_deviation - cof_deviation.rolling(window=52, min_periods=10).mean()) / cof_deviation.rolling(window=52, min_periods=10).std()
+                liquidity_normalized = (liquidity_indicator - liquidity_indicator.rolling(window=52, min_periods=10).mean()) / liquidity_indicator.rolling(window=52, min_periods=10).std()
+                
+                # Plot normalized COF deviation as line
+                line = ax1.plot(self.liquidity_analysis['analysis_data'].index, 
+                              cof_normalized,
+                              label='COF Deviation', color='blue')
+                
+                # Add horizontal line at y=0
+                ax1.axhline(y=0, color='black', linestyle='--', alpha=0.3)
+                
+                # Plot normalized liquidity indicator as bars
+                bars = ax2.bar(self.liquidity_analysis['analysis_data'].index,
+                             liquidity_normalized,
+                             label='Fed Funds-SOFR Spread', color='red', alpha=0.3)
+                
+                # Set labels and title
+                ax1.set_ylabel('COF Deviation', color='blue')
+                ax2.set_ylabel('Fed Funds-SOFR Spread', color='red')
+                ax1.set_title('COF Deviation vs Fed Funds-SOFR Spread')
+                
+                # Align y-axes at y=0 with symmetric limits
+                y1_min, y1_max = ax1.get_ylim()
+                y2_min, y2_max = ax2.get_ylim()
+                
+                # Find the maximum absolute value for each axis
+                y1_abs_max = max(abs(y1_min), abs(y1_max))
+                y2_abs_max = max(abs(y2_min), abs(y2_max))
+                
+                # Set symmetric limits around zero
+                ax1.set_ylim(-y1_abs_max, y1_abs_max)
+                ax2.set_ylim(-y2_abs_max, y2_abs_max)
+                
+                # Add legends
+                lines1, labels1 = ax1.get_legend_handles_labels()
+                lines2, labels2 = ax2.get_legend_handles_labels()
+                ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper right')
+                
+                # Add grid
+                ax1.grid(True, alpha=0.3)
                 
                 plt.tight_layout()
                 plt.show()
