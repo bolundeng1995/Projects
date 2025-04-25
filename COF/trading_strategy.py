@@ -252,7 +252,12 @@ class COFTradingStrategy:
                 prev_price = price
             
             # Save detailed trading information to CSV
-            self.positions.to_csv('trading_results.csv')
+            results_df = self.positions.copy()
+            results_df['cof_actual'] = self.cof_data['cof_actual']
+            results_df['cof_predicted'] = self.cof_data['cof_predicted']
+            results_df['cof_deviation'] = self.cof_data['cof_deviation']
+            results_df['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore']
+            results_df.to_csv('trading_results.csv')
             logger.info("Trading results saved to trading_results.csv")
             
             # Calculate performance metrics
