@@ -32,7 +32,7 @@ class SPXCOFAnalyzer:
             # Ensure all required columns are present
             required_columns = [
                 'cof', 'cftc_positions',
-                'fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis'
+                'fed_funds_sofr_spread'
             ]
             
             missing_columns = [col for col in required_columns if col not in self.data.columns]
@@ -84,18 +84,18 @@ class SPXCOFAnalyzer:
             # Merge model results with liquidity data
             analysis_data = pd.merge(
                 self.model_results[['date', 'cof_deviation']],
-                self.data[['fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']],
+                self.data[['fed_funds_sofr_spread']],
                 left_on='date',
                 right_index=True,
                 how='inner'
             )
             
             # Calculate correlation between COF deviation and liquidity indicators
-            liquidity_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']].corr()
+            liquidity_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].corr()
             
             # Calculate rolling correlation
             window_size = 60  # 3 months
-            rolling_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread', 'swap_spread', 'jpyusd_basis']].rolling(window_size).corr()
+            rolling_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].rolling(window_size).corr()
             
             # Store results
             self.liquidity_analysis = {
