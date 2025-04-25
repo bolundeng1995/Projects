@@ -169,28 +169,29 @@ class COFTradingStrategy:
             entry_date = None
             cumulative_pnl = 0
             base_capital = self.initial_capital
+            prev_price = None
             
             for i in range(1, len(self.cof_data)):
                 signal = self.cof_data['signal'].iloc[i]
                 price = self.cof_data['cof_actual'].iloc[i]
                 current_date = self.cof_data.index[i]
                 
-                # Calculate unrealized PnL if in a position
+                # Calculate daily unrealized PnL if in a position
                 if current_position != 0:
-                    unrealized_pnl = current_position * (price - entry_price)
-                    self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = unrealized_pnl
+                    if prev_price is not None:
+                        # Calculate daily change in PnL
+                        daily_pnl = current_position * (price - prev_price)
+                        self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = daily_pnl
+                        base_capital += daily_pnl
                     
-                    # Update capital to include unrealized PnL
-                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital + unrealized_pnl
-                    
-                    # Check for stop loss
-                    if unrealized_pnl <= -max_loss:
+                    # Check for stop loss using cumulative PnL
+                    cumulative_unrealized_pnl = current_position * (price - entry_price)
+                    if cumulative_unrealized_pnl <= -max_loss:
                         # Exit position due to stop loss
-                        base_capital += unrealized_pnl
                         self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
                         self.positions.iloc[i, self.positions.columns.get_loc('exit_price')] = price
-                        self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = unrealized_pnl
-                        cumulative_pnl += unrealized_pnl
+                        self.positions.iloc[i, self.positions.columns.get_loc('pnl')] = cumulative_unrealized_pnl
+                        cumulative_pnl += cumulative_unrealized_pnl
                         self.positions.iloc[i, self.positions.columns.get_loc('cumulative_pnl')] = cumulative_pnl
                         self.positions.iloc[i, self.positions.columns.get_loc('exit_reason')] = 'stop_loss'
                         self.positions.iloc[i, self.positions.columns.get_loc('trade_duration')] = (
@@ -235,13 +236,9 @@ class COFTradingStrategy:
                 else:
                     # Maintain current position
                     self.positions.iloc[i, self.positions.columns.get_loc('position')] = current_position
-                    if current_position != 0:
-                        # Include unrealized PnL in capital when maintaining position
-                        unrealized_pnl = current_position * (price - entry_price)
-                        self.positions.iloc[i, self.positions.columns.get_loc('unrealized_pnl')] = unrealized_pnl
-                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital + unrealized_pnl
-                    else:
-                        self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
+                    self.positions.iloc[i, self.positions.columns.get_loc('capital')] = base_capital
+                
+                prev_price = price
             
             # Save detailed trading information to CSV
             self.positions.to_csv('trading_results.csv')

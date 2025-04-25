@@ -29,9 +29,12 @@ class SPXCOFAnalyzer:
             # Read data from Excel
             self.data = pd.read_excel(file_path, index_col=0)
             
+            # Sort data in ascending order (oldest to latest)
+            self.data = self.data.sort_index()
+            
             # Ensure all required columns are present
             required_columns = [
-                'cof', 'cftc_positions',
+                '1Y COF', 'cftc_positions',
                 'fed_funds_sofr_spread'
             ]
             
@@ -45,7 +48,7 @@ class SPXCOFAnalyzer:
             logger.error(f"Error loading data from Excel: {str(e)}")
             raise
     
-    def train_model(self, window_size=252):  # 252 trading days = 1 year
+    def train_model(self, window_size=52):  # 52 trading weeks = 1 year
         """Train rolling window regression model"""
         try:
             results = []
@@ -55,18 +58,18 @@ class SPXCOFAnalyzer:
                 
                 # Use CFTC positions as independent variable
                 X = window_data[['cftc_positions']]
-                y = window_data['cof']
+                y = window_data['1Y COF']
                 
                 model = OLS(y, X).fit()
                 
                 results.append({
-                    'date': self.data.index[i],
-                    'cof_actual': self.data['cof'].iloc[i],
+                    'date': self.data.index[i-1],
+                    'cof_actual': self.data['1Y COF'].iloc[i-1],
                     'cof_predicted': model.predict(X.iloc[-1:])[0],
                     'r_squared': model.rsquared
                 })
             
-            self.model_results = pd.DataFrame(results)
+            self.model_results = pd.DataFrame(results).set_index('date')
             logger.info("Model training completed successfully")
             
         except Exception as e:
@@ -83,9 +86,9 @@ class SPXCOFAnalyzer:
             
             # Merge model results with liquidity data
             analysis_data = pd.merge(
-                self.model_results[['date', 'cof_deviation']],
+                self.model_results[['cof_deviation']],
                 self.data[['fed_funds_sofr_spread']],
-                left_on='date',
+                left_index=True,
                 right_index=True,
                 how='inner'
             )
@@ -94,7 +97,7 @@ class SPXCOFAnalyzer:
             liquidity_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].corr()
             
             # Calculate rolling correlation
-            window_size = 60  # 3 months
+            window_size = 12  # 3 months
             rolling_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].rolling(window_size).corr()
             
             # Store results
@@ -117,9 +120,9 @@ class SPXCOFAnalyzer:
             
             # Plot actual vs predicted COF
             plt.subplot(2, 1, 1)
-            plt.plot(self.model_results['date'], self.model_results['cof_actual'], 
+            plt.plot(self.model_results.index, self.model_results['cof_actual'], 
                     label='Actual COF', color='blue')
-            plt.plot(self.model_results['date'], self.model_results['cof_predicted'], 
+            plt.plot(self.model_results.index, self.model_results['cof_predicted'], 
                     label='Predicted COF', color='red', linestyle='--')
             plt.title('SPX Cost of Financing: Actual vs Predicted')
             plt.legend()
@@ -127,7 +130,7 @@ class SPXCOFAnalyzer:
             
             # Plot COF deviation
             plt.subplot(2, 1, 2)
-            plt.plot(self.model_results['date'], self.model_results['cof_deviation'], 
+            plt.plot(self.model_results.index, self.model_results['cof_deviation'], 
                     label='COF Deviation', color='green')
             plt.title('COF Deviation from Fair Value')
             plt.legend()
