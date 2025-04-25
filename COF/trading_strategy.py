@@ -92,18 +92,29 @@ class COFTradingStrategy:
             
             # Generate signals
             self.cof_data['signal'] = 0
-            
-            # Long signal: COF is cheap (negative z-score) and liquidity is normal
-            long_condition = (
-                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
-                (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
-            )
-            
-            # Short signal: COF is expensive (positive z-score) and liquidity is normal
-            short_condition = (
-                (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
-                (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
-            )
+
+            if liquidity_threshold == None:
+                            # Long signal: COF is cheap (negative z-score) and liquidity is normal
+                long_condition = (
+                    (self.cof_data['cof_deviation_zscore'] < -entry_threshold) 
+                )
+                
+                # Short signal: COF is expensive (positive z-score) and liquidity is normal
+                short_condition = (
+                    (self.cof_data['cof_deviation_zscore'] > entry_threshold) 
+                )
+            else:
+                # Long signal: COF is cheap (negative z-score) and liquidity is normal
+                long_condition = (
+                    (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
+                    (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
+                )
+                
+                # Short signal: COF is expensive (positive z-score) and liquidity is normal
+                short_condition = (
+                    (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
+                    (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
+                )
             
             # Exit conditions
             long_exit_condition = (
@@ -267,6 +278,7 @@ class COFTradingStrategy:
             # Calculate win rate
             trades = self.positions['pnl'] != 0
             winning_trades = self.positions['pnl'] > 0
+            losing_trades = self.positions['pnl'] < 0
             win_rate = winning_trades.sum() / trades.sum()
             
             # Store metrics
@@ -277,9 +289,9 @@ class COFTradingStrategy:
                 'max_drawdown': max_drawdown,
                 'win_rate': win_rate,
                 'avg_win_pnl': self.positions['pnl'][winning_trades].mean(),
-                'avg_loss_pnl': self.positions['pnl'][~winning_trades].mean(),
+                'avg_loss_pnl': self.positions['pnl'][losing_trades].mean(),
                 'avg_win_trade_duration': self.positions['trade_duration'][winning_trades].mean(),
-                'avg_loss_trade_duration': self.positions['trade_duration'][~winning_trades].mean()
+                'avg_loss_trade_duration': self.positions['trade_duration'][losing_trades].mean()
             }
             
             logger.info("Performance metrics calculated successfully")
@@ -317,7 +329,19 @@ class COFTradingStrategy:
             # Plot daily mark-to-market performance
             plt.subplot(3, 1, 2)
             daily_returns = total_capital.diff()
-            plt.plot(self.positions.index, daily_returns, label='Daily Returns', color='green')
+            
+            # Create separate series for positive and negative returns
+            positive_returns = daily_returns.copy()
+            positive_returns[positive_returns < 0] = 0
+            negative_returns = daily_returns.copy()
+            negative_returns[negative_returns > 0] = 0
+            
+            # Plot positive and negative returns separately
+            plt.bar(self.positions.index, positive_returns, 
+                   label='Positive Returns', color='green', alpha=0.6)
+            plt.bar(self.positions.index, negative_returns, 
+                   label='Negative Returns', color='red', alpha=0.6)
+            
             plt.axhline(y=0, color='black', linestyle='--', alpha=0.3)
             plt.title('Daily Mark-to-Market Performance')
             plt.legend()
