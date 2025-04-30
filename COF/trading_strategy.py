@@ -239,6 +239,9 @@ class COFTradingStrategy:
         self.cof_data['cof_deviation_zscore'] = (
             self.cof_data['cof_deviation'] - rolling_mean
         ) / rolling_std
+        
+        # Fill NaN values with 0
+        self.cof_data['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore'].fillna(0)
 
     def _apply_signal_logic(self, entry_threshold: float, exit_threshold: float, 
                           liquidity_threshold: Optional[float]) -> None:
@@ -350,9 +353,12 @@ class COFTradingStrategy:
             transaction_cost (float): Transaction cost as a fraction of trade value
             current_zscore (float): Current COF deviation z-score
         """
-        self.trade_tracker.update_daily_pnl(idx, self.position, price, prev_price)
+        # Update daily PnL including transaction costs
+        if prev_price is not None:
+            daily_pnl = self.position.size * (price - prev_price)
+            self.trade_tracker.update_daily_pnl(idx, self.position, price, prev_price)
         
-        # Check stop loss
+        # Check stop loss using absolute terms
         cumulative_unrealized_pnl = self.position.size * (price - self.position.avg_entry_price)
         if cumulative_unrealized_pnl <= -max_loss:
             self.trade_tracker.record_trade_exit(idx, self.position, price, 'stop_loss')
@@ -364,7 +370,8 @@ class COFTradingStrategy:
             if (self.position.size > 0 and current_zscore < -double_threshold) or \
                (self.position.size < 0 and current_zscore > double_threshold):
                 self.position.double_down(price)
-                self.trade_tracker.record_position_update(idx, self.position, price, transaction_cost)
+                enter_reason = f'doubled_down_zscore_{current_zscore:.2f}'
+                self.trade_tracker.record_position_update(idx, self.position, price, transaction_cost, enter_reason)
                 logger.info(f"Doubled down position at {self.cof_data.index[idx]} with z-score {current_zscore:.2f}")
 
     def _enter_new_position(self, idx: int, signal: int, price: float, 
