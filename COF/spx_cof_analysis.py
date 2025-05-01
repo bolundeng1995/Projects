@@ -5,45 +5,25 @@ import seaborn as sns
 from statsmodels.regression.linear_model import OLS
 from sklearn.metrics import r2_score
 import logging
-from scipy.optimize import minimize
-from typing import Optional, Dict, Tuple, Any
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 class SPXCOFAnalyzer:
-    """A class for analyzing the relationship between SPX Cost of Financing (COF) and CFTC positions.
-    
-    This class implements a constrained quadratic regression model to analyze the relationship
-    between CFTC positions and COF, ensuring the relationship is non-decreasing. It includes
-    methods for data loading, model training, and visualization of results.
-
-    Attributes:
-        data (pd.DataFrame): Raw data loaded from Excel file
-        model_results (pd.DataFrame): Results from the trained model including predictions
-        liquidity_analysis (dict): Results from liquidity analysis if performed
-    """
-
     def __init__(self):
-        """Initialize the SPX COF analyzer with empty data structures."""
-        self.data: Optional[pd.DataFrame] = None
-        self.model_results: Optional[pd.DataFrame] = None
-        self.liquidity_analysis: Optional[Dict[str, Any]] = None
+        """Initialize the SPX COF analyzer"""
+        self.data = None
+        self.model_results = None
         
-    def load_data_from_excel(self, file_path: str = 'COF_DATA.xlsx') -> None:
-        """Load and validate data from Excel file.
+    def load_data_from_excel(self, file_path='COF_DATA.xlsx'):
+        """
+        Load data from Excel file
         
-        This method loads data from an Excel file, performs basic validation,
-        and prepares it for analysis. It ensures all required columns are present
-        and sorts the data chronologically.
-
-        Args:
-            file_path (str): Path to the Excel file containing the data
-
-        Raises:
-            ValueError: If required columns are missing
-            Exception: For other data loading errors
+        Parameters:
+        -----------
+        file_path : str
+            Path to the Excel file containing the data
         """
         try:
             # Read data from Excel
@@ -67,91 +47,38 @@ class SPXCOFAnalyzer:
         except Exception as e:
             logger.error(f"Error loading data from Excel: {str(e)}")
             raise
-
-    def _create_quadratic_features(self, data: pd.DataFrame) -> pd.DataFrame:
-        """Create quadratic features for CFTC positions.
-        
-        Args:
-            data (pd.DataFrame): Input data containing CFTC positions
-            
-        Returns:
-            pd.DataFrame: Features matrix with columns:
-                - cftc_positions: Original CFTC position values
-                - cftc_positions_squared: Squared CFTC position values
-                - const: Constant term (1)
-        """
-        return pd.DataFrame({
-            'cftc_positions': data['cftc_positions'],
-            'cftc_positions_squared': data['cftc_positions'] ** 2,
-            'const': 1
-        })
-
-    def _fit_quadratic(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, float]:
-        """Fit a quadratic model using ordinary least squares.
-        
-        Args:
-            X (pd.DataFrame): Feature matrix
-            y (pd.Series): Target values
-            
-        Returns:
-            Tuple[np.ndarray, float]: A tuple containing:
-                - np.ndarray: Model coefficients [a, b, c]
-                - float: R-squared value of the fit
-        """
-        # Fit quadratic model using OLS
-        model = OLS(y, X).fit()
-        
-        # Get coefficients and R-squared
-        coefficients = np.array([
-            model.params['cftc_positions_squared'],
-            model.params['cftc_positions'],
-            model.params['const']
-        ])
-        
-        return coefficients, model.rsquared
-
-    def train_model(self, window_size: int = 52) -> None:
-        """Train rolling window regression model using quadratic form.
-        
-        This method implements a rolling window approach where for each window:
-        1. Creates quadratic features
-        2. Fits a quadratic model
-        3. Makes predictions
-        4. Stores results
-
-        Args:
-            window_size (int): Size of the rolling window in weeks (default: 52)
-
-        Raises:
-            Exception: If there's an error during model training
-        """
+    
+    def train_model(self, window_size=52):  # 52 trading weeks = 1 year
+        """Train rolling window regression model using quadratic form"""
         try:
             results = []
             
             for i in range(window_size, len(self.data)):
-                # Get window data
                 window_data = self.data.iloc[i-window_size:i]
                 
-                # Prepare features and target
-                X = self._create_quadratic_features(window_data)
+                # Create quadratic terms for CFTC positions
+                X = pd.DataFrame({
+                    'cftc_positions': window_data['cftc_positions'],
+                    'cftc_positions_squared': window_data['cftc_positions'] ** 2
+                })
                 y = window_data['1Y COF']
                 
-                # Fit model and get coefficients
-                (a, b, c), r2 = self._fit_quadratic(X, y)
+                model = OLS(y, X).fit()
                 
-                # Make prediction for the last data point
-                last_cftc = window_data['cftc_positions'].iloc[-1]
-                last_pred = a * (last_cftc ** 2) + b * last_cftc + c
+                # Predict using the last row of data
+                last_X = pd.DataFrame({
+                    'cftc_positions': [window_data['cftc_positions'].iloc[-1]],
+                    'cftc_positions_squared': [window_data['cftc_positions'].iloc[-1] ** 2]
+                })
                 
-                # Store results
                 results.append({
                     'date': self.data.index[i-1],
                     'cof_actual': self.data['1Y COF'].iloc[i-1],
-                    'cof_predicted': last_pred,
-                    'r_squared': r2,
-                    'quadratic_coef': a,
-                    'linear_coef': b,
-                    'intercept': c
+                    'cof_predicted': model.predict(last_X)[0],
+                    'r_squared': model.rsquared,
+                    'quadratic_coef': model.params['cftc_positions_squared'],
+                    'linear_coef': model.params['cftc_positions'],
+                    'intercept': model.params['const'] if 'const' in model.params else 0
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
@@ -221,31 +148,22 @@ class SPXCOFAnalyzer:
             plt.legend()
             plt.grid(True)
             
-            # Plot actual COF vs CFTC positions with constrained quadratic fit
+            # Plot actual COF vs CFTC positions with quadratic fit
             plt.subplot(3, 1, 3)
             plt.scatter(self.data['cftc_positions'], self.data['1Y COF'], 
                        alpha=0.5, color='blue', label='COF vs CFTC Positions')
             
-            # Add constrained quadratic regression line
+            # Add quadratic regression line
             z = np.polyfit(self.data['cftc_positions'], self.data['1Y COF'], 2)
             p = np.poly1d(z)
             x_sorted = np.sort(self.data['cftc_positions'])
-            
-            # Ensure the function is non-decreasing
-            a, b, c = z
-            if 2 * a * x_sorted[0] + b < 0:  # If derivative is negative at start
-                # Adjust coefficients to make it non-decreasing
-                b = -2 * a * x_sorted[0]  # Set derivative to 0 at start
-                c = p(x_sorted[0]) - (a * x_sorted[0]**2 + b * x_sorted[0])  # Adjust intercept
-            
-            p = np.poly1d([a, b, c])
             plt.plot(x_sorted, p(x_sorted), 
                     "r--", alpha=0.8, 
-                    label=f'Constrained Quadratic Fit (y={a:.2f}x²+{b:.2f}x+{c:.2f})')
+                    label=f'Quadratic Fit (y={z[0]:.2f}x²+{z[1]:.2f}x+{z[2]:.2f})')
             
             plt.xlabel('CFTC Positions')
             plt.ylabel('Actual COF')
-            plt.title('COF vs CFTC Positions Scatter Plot with Constrained Quadratic Fit')
+            plt.title('COF vs CFTC Positions Scatter Plot with Quadratic Fit')
             plt.legend()
             plt.grid(True)
             
