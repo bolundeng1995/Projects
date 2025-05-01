@@ -30,6 +30,9 @@ class SPXCOFAnalyzer:
             # Read data from Excel
             self.data = pd.read_excel(file_path, sheet_name="Data", index_col=0)
             
+            # Multiply fed_funds_sofr_spread by -1, and thus positive values will be associated with higher liquidity stress
+            self.data['fed_funds_sofr_spread'] = self.data['fed_funds_sofr_spread'] * -1
+            
             # Sort data in ascending order (oldest to latest)
             self.data = self.data.sort_index()
             
