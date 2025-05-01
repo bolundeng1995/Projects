@@ -286,13 +286,13 @@ class COFTradingStrategy:
         
         # Apply exit conditions
         long_exit = (
-            (self.cof_data['cof_deviation_zscore'] > -exit_threshold) |
-            (self.cof_data['cof_deviation'] > -deviation_exit_threshold) &
+            ((self.cof_data['cof_deviation_zscore'] > -exit_threshold) |
+            (self.cof_data['cof_deviation'] > -deviation_exit_threshold)) &
             (self.cof_data['signal'].shift(1) == 1)
         )
         short_exit = (
-            (self.cof_data['cof_deviation_zscore'] < exit_threshold) |
-            (self.cof_data['cof_deviation'] < deviation_exit_threshold) &
+            ((self.cof_data['cof_deviation_zscore'] < exit_threshold) |
+            (self.cof_data['cof_deviation'] < deviation_exit_threshold)) &
             (self.cof_data['signal'].shift(1) == -1)
         )
         
@@ -301,11 +301,11 @@ class COFTradingStrategy:
         
         # Maintain positions until exit threshold is crossed
         for i in range(1, len(self.cof_data)):
-            if self.cof_data['signal'].iloc[i] == 1:
+            if self.cof_data['signal'].iloc[i - 1] == 1:
                 if (self.cof_data['cof_deviation_zscore'].iloc[i] < -exit_threshold and 
                     self.cof_data['cof_deviation'].iloc[i] < -deviation_exit_threshold):
                     self.cof_data.loc[i, 'signal'] = 1  # maintain long position
-            elif self.cof_data['signal'].iloc[i] == -1:
+            elif self.cof_data['signal'].iloc[i - 1] == -1:
                 if (self.cof_data['cof_deviation_zscore'].iloc[i] > exit_threshold and 
                     self.cof_data['cof_deviation'].iloc[i] > deviation_exit_threshold):
                     self.cof_data.loc[i, 'signal'] = -1  # maintain short position
