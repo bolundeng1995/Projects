@@ -69,10 +69,12 @@ class SPXCOFAnalyzer:
                 
                 # Predict using the last row of data
                 last_X = pd.DataFrame({
+                    'const': [1],  # Add constant term explicitly
                     'cftc_positions': [window_data['cftc_positions'].iloc[-1]],
                     'cftc_positions_squared': [window_data['cftc_positions'].iloc[-1] ** 2]
                 })
-                last_X = sm.add_constant(last_X)  # Add constant term
+                # Ensure columns are in the same order as the training data
+                last_X = last_X[X.columns]
                 
                 results.append({
                     'date': self.data.index[i-1],
