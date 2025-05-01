@@ -71,9 +71,6 @@ class SPXCOFAnalyzer:
     def _create_quadratic_features(self, data: pd.DataFrame) -> pd.DataFrame:
         """Create quadratic features for CFTC positions.
         
-        This method creates a feature matrix containing both linear and quadratic
-        terms of CFTC positions for the quadratic regression model.
-
         Args:
             data (pd.DataFrame): Input data containing CFTC positions
             
@@ -81,112 +78,46 @@ class SPXCOFAnalyzer:
             pd.DataFrame: Features matrix with columns:
                 - cftc_positions: Original CFTC position values
                 - cftc_positions_squared: Squared CFTC position values
+                - const: Constant term (1)
         """
         return pd.DataFrame({
             'cftc_positions': data['cftc_positions'],
-            'cftc_positions_squared': data['cftc_positions'] ** 2
+            'cftc_positions_squared': data['cftc_positions'] ** 2,
+            'const': 1
         })
 
-    def _objective_function(self, params: np.ndarray, X: pd.DataFrame, y: pd.Series) -> float:
-        """Objective function for optimization: minimize sum of squared errors.
+    def _fit_quadratic(self, X: pd.DataFrame, y: pd.Series) -> Tuple[np.ndarray, float]:
+        """Fit a quadratic model using ordinary least squares.
         
-        This method implements the objective function for the optimization problem,
-        which is to minimize the sum of squared errors between predicted and actual COF values.
-
-        Args:
-            params (np.ndarray): Model parameters [a, b, c] where:
-                - a: coefficient for quadratic term
-                - b: coefficient for linear term
-                - c: intercept
-            X (pd.DataFrame): Feature matrix
-            y (pd.Series): Target values (actual COF)
-            
-        Returns:
-            float: Sum of squared errors between predicted and actual values
-        """
-        a, b, c = params
-        y_pred = a * X['cftc_positions_squared'] + b * X['cftc_positions'] + c
-        return np.sum((y - y_pred) ** 2)
-
-    def _monotonicity_constraint(self, params: np.ndarray, min_cftc: float, max_cftc: float) -> float:
-        """Constraint ensuring the quadratic function is non-decreasing.
-        
-        This method implements the constraint that ensures the quadratic function
-        is non-decreasing across the range of CFTC positions. It checks that the
-        derivative (2ax + b) is non-negative at both the minimum and maximum
-        CFTC position values.
-
-        Args:
-            params (np.ndarray): Model parameters [a, b, c]
-            min_cftc (float): Minimum CFTC position value in the window
-            max_cftc (float): Maximum CFTC position value in the window
-            
-        Returns:
-            float: Minimum value of the derivative in the range, which must be ≥ 0
-        """
-        a, b, _ = params
-        return min(2 * a * min_cftc + b, 2 * a * max_cftc + b)
-
-    def _fit_constrained_quadratic(self, X: pd.DataFrame, y: pd.Series, 
-                                 min_cftc: float, max_cftc: float) -> Tuple[np.ndarray, float]:
-        """Fit a constrained quadratic model using optimization.
-        
-        This method fits a quadratic model to the data while ensuring the function
-        is non-decreasing. It uses scipy's minimize function with the SLSQP method
-        to find the optimal parameters that minimize squared errors while satisfying
-        the monotonicity constraint.
-
         Args:
             X (pd.DataFrame): Feature matrix
             y (pd.Series): Target values
-            min_cftc (float): Minimum CFTC position value
-            max_cftc (float): Maximum CFTC position value
             
         Returns:
             Tuple[np.ndarray, float]: A tuple containing:
                 - np.ndarray: Model coefficients [a, b, c]
                 - float: R-squared value of the fit
         """
-        # Initial guess for parameters
-        x0 = [0.1, 0.1, 0.1]
+        # Fit quadratic model using OLS
+        model = OLS(y, X).fit()
         
-        # Constraints: derivative must be non-negative
-        constraints = {
-            'type': 'ineq',
-            'fun': lambda params: self._monotonicity_constraint(params, min_cftc, max_cftc)
-        }
+        # Get coefficients and R-squared
+        coefficients = np.array([
+            model.params['cftc_positions_squared'],
+            model.params['cftc_positions'],
+            model.params['const']
+        ])
         
-        # Bounds for parameters (a ≥ 0 to ensure convexity)
-        bounds = [(0, None), (None, None), (None, None)]
-        
-        # Optimize
-        result = minimize(
-            lambda params: self._objective_function(params, X, y),
-            x0,
-            method='SLSQP',
-            constraints=constraints,
-            bounds=bounds
-        )
-        
-        # Calculate R-squared
-        a, b, c = result.x
-        y_pred = a * X['cftc_positions_squared'] + b * X['cftc_positions'] + c
-        r2 = 1 - np.sum((y - y_pred) ** 2) / np.sum((y - y.mean()) ** 2)
-        
-        return result.x, r2
+        return coefficients, model.rsquared
 
     def train_model(self, window_size: int = 52) -> None:
-        """Train rolling window regression model using constrained quadratic form.
+        """Train rolling window regression model using quadratic form.
         
         This method implements a rolling window approach where for each window:
         1. Creates quadratic features
-        2. Fits a constrained quadratic model
+        2. Fits a quadratic model
         3. Makes predictions
         4. Stores results
-        
-        The model ensures that the relationship between CFTC positions and COF
-        is non-decreasing, meaning higher CFTC positions always correspond to
-        higher COF values.
 
         Args:
             window_size (int): Size of the rolling window in weeks (default: 52)
@@ -200,15 +131,13 @@ class SPXCOFAnalyzer:
             for i in range(window_size, len(self.data)):
                 # Get window data
                 window_data = self.data.iloc[i-window_size:i]
-                min_cftc = window_data['cftc_positions'].min()
-                max_cftc = window_data['cftc_positions'].max()
                 
                 # Prepare features and target
                 X = self._create_quadratic_features(window_data)
                 y = window_data['1Y COF']
                 
                 # Fit model and get coefficients
-                (a, b, c), r2 = self._fit_constrained_quadratic(X, y, min_cftc, max_cftc)
+                (a, b, c), r2 = self._fit_quadratic(X, y)
                 
                 # Make prediction for the last data point
                 last_cftc = window_data['cftc_positions'].iloc[-1]
@@ -226,7 +155,7 @@ class SPXCOFAnalyzer:
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
-            logger.info("Constrained quadratic model training completed successfully")
+            logger.info("Quadratic model training completed successfully")
             
         except Exception as e:
             logger.error(f"Error training model: {str(e)}")
