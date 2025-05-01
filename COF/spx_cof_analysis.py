@@ -49,28 +49,40 @@ class SPXCOFAnalyzer:
             raise
     
     def train_model(self, window_size=52):  # 52 trading weeks = 1 year
-        """Train rolling window regression model"""
+        """Train rolling window regression model using quadratic form"""
         try:
             results = []
             
             for i in range(window_size, len(self.data)):
                 window_data = self.data.iloc[i-window_size:i]
                 
-                # Use CFTC positions as independent variable
-                X = window_data[['cftc_positions']]
+                # Create quadratic terms for CFTC positions
+                X = pd.DataFrame({
+                    'cftc_positions': window_data['cftc_positions'],
+                    'cftc_positions_squared': window_data['cftc_positions'] ** 2
+                })
                 y = window_data['1Y COF']
                 
                 model = OLS(y, X).fit()
                 
+                # Predict using the last row of data
+                last_X = pd.DataFrame({
+                    'cftc_positions': [window_data['cftc_positions'].iloc[-1]],
+                    'cftc_positions_squared': [window_data['cftc_positions'].iloc[-1] ** 2]
+                })
+                
                 results.append({
                     'date': self.data.index[i-1],
                     'cof_actual': self.data['1Y COF'].iloc[i-1],
-                    'cof_predicted': model.predict(X.iloc[-1:])[0],
-                    'r_squared': model.rsquared
+                    'cof_predicted': model.predict(last_X)[0],
+                    'r_squared': model.rsquared,
+                    'quadratic_coef': model.params['cftc_positions_squared'],
+                    'linear_coef': model.params['cftc_positions'],
+                    'intercept': model.params['const'] if 'const' in model.params else 0
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
-            logger.info("Model training completed successfully")
+            logger.info("Quadratic model training completed successfully")
             
         except Exception as e:
             logger.error(f"Error training model: {str(e)}")
@@ -116,7 +128,7 @@ class SPXCOFAnalyzer:
     def plot_results(self):
         """Create visualization of results"""
         try:
-            plt.figure(figsize=(15, 15))  # Increased figure height for new plot
+            plt.figure(figsize=(15, 15))
             
             # Plot actual vs predicted COF
             plt.subplot(3, 1, 1)
@@ -136,26 +148,29 @@ class SPXCOFAnalyzer:
             plt.legend()
             plt.grid(True)
             
-            # Plot actual COF vs CFTC positions
+            # Plot actual COF vs CFTC positions with quadratic fit
             plt.subplot(3, 1, 3)
             plt.scatter(self.data['cftc_positions'], self.data['1Y COF'], 
                        alpha=0.5, color='blue', label='COF vs CFTC Positions')
             
-            # Add regression line
-            z = np.polyfit(self.data['cftc_positions'], self.data['1Y COF'], 1)
+            # Add quadratic regression line
+            z = np.polyfit(self.data['cftc_positions'], self.data['1Y COF'], 2)
             p = np.poly1d(z)
-            plt.plot(self.data['cftc_positions'], p(self.data['cftc_positions']), 
-                    "r--", alpha=0.8, label=f'Regression Line (y={z[0]:.2f}x+{z[1]:.2f})')
+            x_sorted = np.sort(self.data['cftc_positions'])
+            plt.plot(x_sorted, p(x_sorted), 
+                    "r--", alpha=0.8, 
+                    label=f'Quadratic Fit (y={z[0]:.2f}x²+{z[1]:.2f}x+{z[2]:.2f})')
             
             plt.xlabel('CFTC Positions')
             plt.ylabel('Actual COF')
-            plt.title('COF vs CFTC Positions Scatter Plot')
+            plt.title('COF vs CFTC Positions Scatter Plot with Quadratic Fit')
             plt.legend()
             plt.grid(True)
             
-            # Add correlation coefficient
-            correlation = self.data['cftc_positions'].corr(self.data['1Y COF'])
-            plt.text(0.05, 0.95, f'Correlation: {correlation:.2f}', 
+            # Add R-squared value
+            y_pred = p(self.data['cftc_positions'])
+            r2 = r2_score(self.data['1Y COF'], y_pred)
+            plt.text(0.05, 0.95, f'R² = {r2:.2f}', 
                     transform=plt.gca().transAxes, 
                     bbox=dict(facecolor='white', alpha=0.8))
             
