@@ -3,7 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import logging
 from dataclasses import dataclass
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
+import itertools
+import seaborn as sns
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -578,6 +580,139 @@ class COFTradingStrategy:
         print(f"Average Win Trade Duration: {self.trade_tracker.metrics['avg_win_trade_duration']:.2f} days")
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
+    def grid_search(self, param_grid: Dict[str, List[float]], 
+                   transaction_cost: float = 0.0001, max_loss: float = 50,
+                   max_position_size: int = 2, double_threshold: float = 3.0) -> pd.DataFrame:
+        """Perform grid search over parameter combinations.
+        
+        Args:
+            param_grid (Dict[str, List[float]]): Dictionary of parameters and their values to test
+                Example: {
+                    'entry_threshold': [1.5, 2.0, 2.5],
+                    'exit_threshold': [0.5, 1.0, 1.5]
+                }
+            transaction_cost (float): Transaction cost as a fraction of trade value
+            max_loss (float): Maximum loss in absolute price terms
+            max_position_size (int): Maximum allowed position size
+            double_threshold (float): Fixed threshold for doubling down
+            
+        Returns:
+            pd.DataFrame: Results of grid search with performance metrics for each combination
+        """
+        results = []
+        
+        # Generate parameter combinations where entry_threshold > exit_threshold
+        param_combinations = []
+        for entry in param_grid['entry_threshold']:
+            for exit in param_grid['exit_threshold']:
+                if entry > exit:  # Only include combinations where entry > exit
+                    param_combinations.append({
+                        'entry_threshold': entry,
+                        'exit_threshold': exit
+                    })
+        
+        for params in param_combinations:
+            try:
+                # Reset strategy state
+                self.trade_tracker = TradeTracker(self.initial_capital)
+                self.position = Position()
+                
+                # Generate signals with current parameters
+                self.generate_signals(
+                    entry_threshold=params['entry_threshold'],
+                    exit_threshold=params['exit_threshold']
+                )
+                
+                # Run backtest
+                self.backtest(
+                    transaction_cost=transaction_cost,
+                    max_loss=max_loss,
+                    double_threshold=double_threshold,
+                    max_position_size=max_position_size
+                )
+                
+                # Calculate performance metrics
+                self.calculate_performance_metrics()
+                
+                # Store results
+                result = {
+                    **params,  # Include parameter values
+                    'total_return': self.trade_tracker.metrics['total_return'],
+                    'sharpe_ratio': self.trade_tracker.metrics['sharpe_ratio'],
+                    'max_drawdown': self.trade_tracker.metrics['max_drawdown'],
+                    'win_rate': self.trade_tracker.metrics['win_rate'],
+                    'num_trades': self.trade_tracker.metrics['num_trades'],
+                    'avg_win_pnl': self.trade_tracker.metrics['avg_win_pnl'],
+                    'avg_loss_pnl': self.trade_tracker.metrics['avg_loss_pnl']
+                }
+                results.append(result)
+                
+                logger.info(f"Completed parameter combination: {params}")
+                
+            except Exception as e:
+                logger.error(f"Error in parameter combination {params}: {str(e)}")
+                continue
+        
+        # Convert results to DataFrame and sort by Sharpe ratio
+        results_df = pd.DataFrame(results)
+        results_df = results_df.sort_values('sharpe_ratio', ascending=False)
+        
+        # Save results to CSV
+        results_df.to_csv('grid_search_results.csv')
+        logger.info("Grid search results saved to grid_search_results.csv")
+        
+        # Create performance grid visualizations
+        self._plot_performance_grids(results_df)
+        
+        return results_df
+
+    def _plot_performance_grids(self, results_df: pd.DataFrame) -> None:
+        """Create grid visualizations of performance metrics.
+        
+        Args:
+            results_df (pd.DataFrame): Results from grid search
+        """
+        # Create pivot tables for each metric
+        metrics = ['sharpe_ratio', 'total_return', 'win_rate', 'max_drawdown']
+        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        fig.suptitle('Performance Metrics Grid', fontsize=16)
+        
+        for idx, metric in enumerate(metrics):
+            row = idx // 2
+            col = idx % 2
+            
+            # Create pivot table
+            pivot = results_df.pivot_table(
+                values=metric,
+                index='entry_threshold',
+                columns='exit_threshold'
+            )
+            
+            # Plot heatmap
+            sns.heatmap(pivot, 
+                       annot=True, 
+                       fmt='.2f',
+                       cmap='RdYlGn' if metric != 'max_drawdown' else 'RdYlGn_r',
+                       ax=axes[row, col])
+            
+            axes[row, col].set_title(f'{metric.replace("_", " ").title()}')
+            axes[row, col].set_xlabel('Exit Threshold')
+            axes[row, col].set_ylabel('Entry Threshold')
+            
+            # Add diagonal line to show where entry = exit
+            x = np.arange(len(pivot.columns))
+            y = np.arange(len(pivot.index))
+            X, Y = np.meshgrid(x, y)
+            mask = Y <= X  # Create mask for cells where entry <= exit
+            axes[row, col].pcolor(X, Y, mask, 
+                                alpha=0.3, 
+                                color='gray', 
+                                hatch='/')
+        
+        plt.tight_layout()
+        plt.savefig('performance_grids.png')
+        plt.close()
+
 def main():
     """Main function to run the trading strategy.
     
@@ -598,10 +733,29 @@ def main():
     
     liquidity_data = data[['fed_funds_sofr_spread']]
     
-    # Initialize and run strategy
+    # Initialize strategy
     strategy = COFTradingStrategy(cof_data, liquidity_data)
     strategy.calculate_liquidity_stress()
-    strategy.generate_signals()
+    
+    # Define parameter grid for grid search
+    param_grid = {
+        'entry_threshold': [1.5, 2.0, 2.5, 3.0],
+        'exit_threshold': [0.5, 1.0, 1.5, 2.0]
+    }
+    
+    # Run grid search
+    results = strategy.grid_search(param_grid)
+    
+    # Print top 5 parameter combinations
+    print("\nTop 5 Parameter Combinations by Sharpe Ratio:")
+    print(results.head().to_string())
+    
+    # Run strategy with best parameters
+    best_params = results.iloc[0]
+    strategy.generate_signals(
+        entry_threshold=best_params['entry_threshold'],
+        exit_threshold=best_params['exit_threshold']
+    )
     strategy.backtest()
     strategy.plot_results()
 
