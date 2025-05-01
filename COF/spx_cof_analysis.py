@@ -3,6 +3,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from statsmodels.regression.linear_model import OLS
+import statsmodels.api as sm
 from sklearn.metrics import r2_score
 import logging
 
@@ -61,6 +62,7 @@ class SPXCOFAnalyzer:
                     'cftc_positions': window_data['cftc_positions'],
                     'cftc_positions_squared': window_data['cftc_positions'] ** 2
                 })
+                X = sm.add_constant(X)  # Add constant term
                 y = window_data['1Y COF']
                 
                 model = OLS(y, X).fit()
@@ -70,6 +72,7 @@ class SPXCOFAnalyzer:
                     'cftc_positions': [window_data['cftc_positions'].iloc[-1]],
                     'cftc_positions_squared': [window_data['cftc_positions'].iloc[-1] ** 2]
                 })
+                last_X = sm.add_constant(last_X)  # Add constant term
                 
                 results.append({
                     'date': self.data.index[i-1],
@@ -78,7 +81,7 @@ class SPXCOFAnalyzer:
                     'r_squared': model.rsquared,
                     'quadratic_coef': model.params['cftc_positions_squared'],
                     'linear_coef': model.params['cftc_positions'],
-                    'intercept': model.params['const'] if 'const' in model.params else 0
+                    'intercept': model.params['const']
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
