@@ -6,7 +6,7 @@ from statsmodels.regression.linear_model import OLS
 from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
-from typing import Optional, Dict, Tuple
+from typing import Optional, Dict, Tuple, Any
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
