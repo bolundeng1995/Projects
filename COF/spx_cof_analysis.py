@@ -116,10 +116,10 @@ class SPXCOFAnalyzer:
     def plot_results(self):
         """Create visualization of results"""
         try:
-            plt.figure(figsize=(15, 10))
+            plt.figure(figsize=(15, 15))  # Increased figure height for new plot
             
             # Plot actual vs predicted COF
-            plt.subplot(2, 1, 1)
+            plt.subplot(3, 1, 1)
             plt.plot(self.model_results.index, self.model_results['cof_actual'], 
                     label='Actual COF', color='blue')
             plt.plot(self.model_results.index, self.model_results['cof_predicted'], 
@@ -129,11 +129,31 @@ class SPXCOFAnalyzer:
             plt.grid(True)
             
             # Plot COF deviation
-            plt.subplot(2, 1, 2)
+            plt.subplot(3, 1, 2)
             plt.plot(self.model_results.index, self.model_results['cof_deviation'], 
                     label='COF Deviation', color='green')
             plt.title('COF Deviation from Fair Value')
             plt.legend()
+            plt.grid(True)
+            
+            # Plot actual COF vs CFTC positions
+            plt.subplot(3, 1, 3)
+            ax1 = plt.gca()
+            ax1.plot(self.data.index, self.data['1Y COF'], 
+                    label='Actual COF', color='blue')
+            ax1.set_ylabel('COF', color='blue')
+            ax1.tick_params(axis='y', labelcolor='blue')
+            
+            ax2 = ax1.twinx()
+            ax2.plot(self.data.index, self.data['cftc_positions'], 
+                    label='CFTC Positions', color='red')
+            ax2.set_ylabel('CFTC Positions', color='red')
+            ax2.tick_params(axis='y', labelcolor='red')
+            
+            plt.title('COF vs CFTC Positions')
+            lines1, labels1 = ax1.get_legend_handles_labels()
+            lines2, labels2 = ax2.get_legend_handles_labels()
+            ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
             plt.grid(True)
             
             plt.tight_layout()
