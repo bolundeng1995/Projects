@@ -138,23 +138,26 @@ class SPXCOFAnalyzer:
             
             # Plot actual COF vs CFTC positions
             plt.subplot(3, 1, 3)
-            ax1 = plt.gca()
-            ax1.plot(self.data.index, self.data['1Y COF'], 
-                    label='Actual COF', color='blue')
-            ax1.set_ylabel('COF', color='blue')
-            ax1.tick_params(axis='y', labelcolor='blue')
+            plt.scatter(self.data['cftc_positions'], self.data['1Y COF'], 
+                       alpha=0.5, color='blue', label='COF vs CFTC Positions')
             
-            ax2 = ax1.twinx()
-            ax2.plot(self.data.index, self.data['cftc_positions'], 
-                    label='CFTC Positions', color='red')
-            ax2.set_ylabel('CFTC Positions', color='red')
-            ax2.tick_params(axis='y', labelcolor='red')
+            # Add regression line
+            z = np.polyfit(self.data['cftc_positions'], self.data['1Y COF'], 1)
+            p = np.poly1d(z)
+            plt.plot(self.data['cftc_positions'], p(self.data['cftc_positions']), 
+                    "r--", alpha=0.8, label=f'Regression Line (y={z[0]:.2f}x+{z[1]:.2f})')
             
-            plt.title('COF vs CFTC Positions')
-            lines1, labels1 = ax1.get_legend_handles_labels()
-            lines2, labels2 = ax2.get_legend_handles_labels()
-            ax1.legend(lines1 + lines2, labels1 + labels2, loc='upper left')
+            plt.xlabel('CFTC Positions')
+            plt.ylabel('Actual COF')
+            plt.title('COF vs CFTC Positions Scatter Plot')
+            plt.legend()
             plt.grid(True)
+            
+            # Add correlation coefficient
+            correlation = self.data['cftc_positions'].corr(self.data['1Y COF'])
+            plt.text(0.05, 0.95, f'Correlation: {correlation:.2f}', 
+                    transform=plt.gca().transAxes, 
+                    bbox=dict(facecolor='white', alpha=0.8))
             
             plt.tight_layout()
             plt.show()
