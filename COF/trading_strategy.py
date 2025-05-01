@@ -109,8 +109,10 @@ class TradeTracker:
         """
         if position.size != 0 and prev_price is not None:
             daily_pnl = position.size * (price - prev_price)
-            self.positions.iloc[idx, self.positions.columns.get_loc('unrealized_pnl')] = daily_pnl
             self.base_capital += daily_pnl
+            self.positions.iloc[idx, self.positions.columns.get_loc('position')] = position.size
+            self.positions.iloc[idx, self.positions.columns.get_loc('unrealized_pnl')] = daily_pnl
+            self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
 
     def record_trade_exit(self, idx: int, position: Position, price: float, exit_reason: str) -> None:
         """Record the details of a trade exit.
@@ -145,7 +147,7 @@ class TradeTracker:
             enter_reason (str): Reason for entering the position
         """
         self.positions.iloc[idx, self.positions.columns.get_loc('position')] = position.size
-        self.positions.iloc[idx, self.positions.columns.get_loc('entry_price')] = position.entry_price
+        self.positions.iloc[idx, self.positions.columns.get_loc('entry_price')] = price
         self.positions.iloc[idx, self.positions.columns.get_loc('enter_reason')] = enter_reason
         cost = abs(position.size) * price * transaction_cost
         self.base_capital -= cost
@@ -254,16 +256,28 @@ class COFTradingStrategy:
         """
         self.cof_data['signal'] = 0
         
+        # Define deviation thresholds (can be adjusted)
+        deviation_entry_threshold = 10  # Example value, adjust based on your needs
+        deviation_exit_threshold = 0    # Example value, adjust based on your needs
+        
         if liquidity_threshold is None:
-            long_condition = (self.cof_data['cof_deviation_zscore'] < -entry_threshold)
-            short_condition = (self.cof_data['cof_deviation_zscore'] > entry_threshold)
+            long_condition = (
+                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) |
+                (self.cof_data['cof_deviation'] < -deviation_entry_threshold)
+            )
+            short_condition = (
+                (self.cof_data['cof_deviation_zscore'] > entry_threshold) |
+                (self.cof_data['cof_deviation'] > deviation_entry_threshold)
+            )
         else:
             long_condition = (
-                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
+                ((self.cof_data['cof_deviation_zscore'] < -entry_threshold) |
+                 (self.cof_data['cof_deviation'] < -deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             short_condition = (
-                (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
+                ((self.cof_data['cof_deviation_zscore'] > entry_threshold) |
+                 (self.cof_data['cof_deviation'] > deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
         
@@ -272,16 +286,29 @@ class COFTradingStrategy:
         
         # Apply exit conditions
         long_exit = (
-            (self.cof_data['cof_deviation_zscore'] > -exit_threshold) &
+            (self.cof_data['cof_deviation_zscore'] > -exit_threshold) |
+            (self.cof_data['cof_deviation'] > -deviation_exit_threshold) &
             (self.cof_data['signal'].shift(1) == 1)
         )
         short_exit = (
-            (self.cof_data['cof_deviation_zscore'] < exit_threshold) &
+            (self.cof_data['cof_deviation_zscore'] < exit_threshold) |
+            (self.cof_data['cof_deviation'] < deviation_exit_threshold) &
             (self.cof_data['signal'].shift(1) == -1)
         )
         
         self.cof_data.loc[long_exit, 'signal'] = 0
         self.cof_data.loc[short_exit, 'signal'] = 0
+        
+        # Maintain positions until exit threshold is crossed
+        for i in range(1, len(self.cof_data)):
+            if self.cof_data['signal'].iloc[i] == 1:
+                if (self.cof_data['cof_deviation_zscore'].iloc[i] < -exit_threshold and 
+                    self.cof_data['cof_deviation'].iloc[i] < -deviation_exit_threshold):
+                    self.cof_data.loc[i, 'signal'] = 1  # maintain long position
+            elif self.cof_data['signal'].iloc[i] == -1:
+                if (self.cof_data['cof_deviation_zscore'].iloc[i] > exit_threshold and 
+                    self.cof_data['cof_deviation'].iloc[i] > deviation_exit_threshold):
+                    self.cof_data.loc[i, 'signal'] = -1  # maintain short position
 
     def backtest(self, transaction_cost: float = 0.0001, max_loss: float = 50,
                 double_threshold: float = 3.0, max_position_size: int = 2) -> None:
@@ -332,7 +359,9 @@ class COFTradingStrategy:
             self._handle_existing_position(idx, price, prev_price, max_loss, 
                                         double_threshold, max_position_size, 
                                         transaction_cost, current_zscore)
-        
+            
+        if signal == 0 and self.position.size == 0:
+            self.trade_tracker.positions.loc[idx, self.trade_tracker.positions.columns.get_loc('capital')] = self.trade_tracker.base_capital
         if signal != 0 and self.position.size == 0:
             self._enter_new_position(idx, signal, price, current_date, transaction_cost)
         elif signal == 0 and self.position.size != 0:
@@ -469,9 +498,6 @@ class COFTradingStrategy:
             
             # Calculate total capital including unrealized PnL
             total_capital = self.trade_tracker.positions['capital'].copy()
-            for i in range(1, len(self.trade_tracker.positions)):
-                if self.trade_tracker.positions['position'].iloc[i] != 0:
-                    total_capital.iloc[i] += self.trade_tracker.positions['unrealized_pnl'].iloc[i]
             
             self._plot_portfolio_value(total_capital)
             self._plot_daily_performance(total_capital)
