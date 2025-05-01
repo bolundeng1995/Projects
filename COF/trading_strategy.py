@@ -304,11 +304,11 @@ class COFTradingStrategy:
             if self.cof_data['signal'].iloc[i - 1] == 1:
                 if (self.cof_data['cof_deviation_zscore'].iloc[i] < -exit_threshold and 
                     self.cof_data['cof_deviation'].iloc[i] < -deviation_exit_threshold):
-                    self.cof_data.loc[i, 'signal'] = 1  # maintain long position
+                    self.cof_data['signal'].iloc[i] = 1  # maintain long position
             elif self.cof_data['signal'].iloc[i - 1] == -1:
                 if (self.cof_data['cof_deviation_zscore'].iloc[i] > exit_threshold and 
                     self.cof_data['cof_deviation'].iloc[i] > deviation_exit_threshold):
-                    self.cof_data.loc[i, 'signal'] = -1  # maintain short position
+                    self.cof_data['signal'].iloc[i] = -1  # maintain short position
 
     def backtest(self, transaction_cost: float = 0.0001, max_loss: float = 50,
                 double_threshold: float = 3.0, max_position_size: int = 2) -> None:
