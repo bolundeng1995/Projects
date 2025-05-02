@@ -761,6 +761,12 @@ def main():
     
     # Run strategy with best parameters
     best_params = results.iloc[0]
+    
+    # Re-initialize strategy components
+    strategy.trade_tracker = TradeTracker(strategy.initial_capital)
+    strategy.position = Position()
+    
+    # Run strategy with best parameters
     strategy.generate_signals(
         entry_threshold=best_params['entry_threshold'],
         exit_threshold=best_params['exit_threshold']
