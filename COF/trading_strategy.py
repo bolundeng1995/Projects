@@ -262,26 +262,26 @@ class COFTradingStrategy:
         self.cof_data['signal'] = 0
         
         # Define deviation thresholds (can be adjusted)
-        deviation_entry_threshold = 10  # Example value, adjust based on your needs
+        deviation_entry_threshold = 5  # Example value, adjust based on your needs
         deviation_exit_threshold = 0    # Example value, adjust based on your needs
         
         if liquidity_threshold is None:
             long_condition = (
-                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) |
+                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
                 (self.cof_data['cof_deviation'] < -deviation_entry_threshold)
             )
             short_condition = (
-                (self.cof_data['cof_deviation_zscore'] > entry_threshold) |
+                (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
                 (self.cof_data['cof_deviation'] > deviation_entry_threshold)
             )
         else:
             long_condition = (
-                ((self.cof_data['cof_deviation_zscore'] < -entry_threshold) |
+                ((self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
                  (self.cof_data['cof_deviation'] < -deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             short_condition = (
-                ((self.cof_data['cof_deviation_zscore'] > entry_threshold) |
+                ((self.cof_data['cof_deviation_zscore'] > entry_threshold) &
                  (self.cof_data['cof_deviation'] > deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
