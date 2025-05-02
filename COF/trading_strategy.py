@@ -317,8 +317,8 @@ class COFTradingStrategy:
                     self.cof_data['cof_deviation'].iloc[i] > deviation_exit_threshold):
                     self.cof_data['signal'].iloc[i] = -1  # maintain short position
 
-    def backtest(self, transaction_cost: float = 0.0001, max_loss: float = 50,
-                double_threshold: float = 3.0, max_position_size: int = 2) -> None:
+    def backtest(self, transaction_cost: float = 0.0, max_loss: float = 20,
+                double_threshold: float = 2.5, max_position_size: int = 2) -> None:
         """Backtest the trading strategy.
         
         Args:
@@ -635,20 +635,19 @@ class COFTradingStrategy:
                 # Run backtest
                 self.backtest()
                 
-                
                 # Calculate performance metrics
                 self.calculate_performance_metrics()
                 
                 # Store results
                 result = {
                     **params,  # Include parameter values
-                    'total_return': self.trade_tracker.metrics['total_return'],
-                    'sharpe_ratio': self.trade_tracker.metrics['sharpe_ratio'],
-                    'max_drawdown': self.trade_tracker.metrics['max_drawdown'],
-                    'win_rate': self.trade_tracker.metrics['win_rate'],
+                    'total_return': round(self.trade_tracker.metrics['total_return'], 2),
+                    'sharpe_ratio': round(self.trade_tracker.metrics['sharpe_ratio'], 2),
+                    'max_drawdown': round(self.trade_tracker.metrics['max_drawdown'], 2),
+                    'win_rate': round(self.trade_tracker.metrics['win_rate'], 2),
                     'num_trades': self.trade_tracker.metrics['num_trades'],
-                    'avg_win_pnl': self.trade_tracker.metrics['avg_win_pnl'],
-                    'avg_loss_pnl': self.trade_tracker.metrics['avg_loss_pnl']
+                    'avg_win_pnl': round(self.trade_tracker.metrics['avg_win_pnl'], 2),
+                    'avg_loss_pnl': round(self.trade_tracker.metrics['avg_loss_pnl'], 2)
                 }
                 results.append(result)
                 
@@ -661,6 +660,11 @@ class COFTradingStrategy:
         # Convert results to DataFrame and sort by Sharpe ratio
         results_df = pd.DataFrame(results)
         results_df = results_df.sort_values('sharpe_ratio', ascending=False)
+        
+        # Format float columns to 2 decimal places
+        float_columns = ['entry_threshold', 'exit_threshold', 'total_return', 'sharpe_ratio', 
+                        'max_drawdown', 'win_rate', 'avg_win_pnl', 'avg_loss_pnl']
+        results_df[float_columns] = results_df[float_columns].round(2)
         
         # Save results to CSV
         results_df.to_csv('grid_search_results.csv')
