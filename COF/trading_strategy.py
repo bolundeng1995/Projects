@@ -473,6 +473,10 @@ class COFTradingStrategy:
             winning_trades = self.trade_tracker.positions['pnl'] > 0
             losing_trades = self.trade_tracker.positions['pnl'] < 0
             
+            avg_win_pnl = self.trade_tracker.positions['pnl'][winning_trades].mean()
+            avg_loss_pnl = abs(self.trade_tracker.positions['pnl'][losing_trades].mean())
+            win_loss_ratio = avg_win_pnl / avg_loss_pnl if avg_loss_pnl != 0 else float('inf')
+            
             self.trade_tracker.metrics = {
                 "num_trades": trades.sum(),
                 'total_return': self.trade_tracker.positions['capital'].iloc[-1],
@@ -480,10 +484,12 @@ class COFTradingStrategy:
                 'max_drawdown': (self.trade_tracker.positions['capital'] - 
                                self.trade_tracker.positions['capital'].cummax()).min(),
                 'win_rate': winning_trades.sum() / trades.sum(),
-                'avg_win_pnl': self.trade_tracker.positions['pnl'][winning_trades].mean(),
-                'avg_loss_pnl': self.trade_tracker.positions['pnl'][losing_trades].mean(),
+                'avg_win_pnl': avg_win_pnl,
+                'avg_loss_pnl': -avg_loss_pnl,  # Store as negative for consistency
+                'win_loss_ratio': win_loss_ratio,
                 'avg_win_trade_duration': self.trade_tracker.positions['trade_duration'][winning_trades].mean(),
                 'avg_loss_trade_duration': self.trade_tracker.positions['trade_duration'][losing_trades].mean(),
+                'avg_trade_duration': self.trade_tracker.positions['trade_duration'][trades].mean(),
                 'entry_threshold': self.trade_tracker.metrics.get('entry_threshold', 'N/A'),
                 'exit_threshold': self.trade_tracker.metrics.get('exit_threshold', 'N/A')
             }
@@ -582,10 +588,12 @@ class COFTradingStrategy:
         print(f"Number of Trades: {self.trade_tracker.metrics['num_trades']}")
         print(f"Total Return: {self.trade_tracker.metrics['total_return']:.2f}")
         print(f"Sharpe Ratio: {self.trade_tracker.metrics['sharpe_ratio']:.2f}")
-        print(f"Maximum Drawdown: {self.trade_tracker.metrics['max_drawdown']:.2%}")
+        print(f"Maximum Drawdown: {self.trade_tracker.metrics['max_drawdown']:.2f}")
         print(f"Win Rate: {self.trade_tracker.metrics['win_rate']:.2%}")
         print(f"Average Win PnL: {self.trade_tracker.metrics['avg_win_pnl']:.2f}")
         print(f"Average Loss PnL: {self.trade_tracker.metrics['avg_loss_pnl']:.2f}")
+        print(f"Win/Loss PnL Ratio: {self.trade_tracker.metrics['win_loss_ratio']:.2f}")
+        print(f"Average Trade Duration: {self.trade_tracker.metrics['avg_trade_duration']:.2f} days")
         print(f"Average Win Trade Duration: {self.trade_tracker.metrics['avg_win_trade_duration']:.2f} days")
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
@@ -697,8 +705,9 @@ class COFTradingStrategy:
             results_df (pd.DataFrame): Results from grid search
         """
         # Create pivot tables for each metric
-        metrics = ['sharpe_ratio', 'total_return', 'win_rate', 'max_drawdown']
-        fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+        metrics = ['sharpe_ratio', 'total_return', 'win_rate', 'max_drawdown', 
+                  'win_loss_ratio', 'avg_trade_duration']
+        fig, axes = plt.subplots(3, 2, figsize=(15, 18))
         fig.suptitle('Performance Metrics Grid', fontsize=16)
         
         for idx, metric in enumerate(metrics):
@@ -723,7 +732,7 @@ class COFTradingStrategy:
             sns.heatmap(pivot, 
                        annot=True, 
                        fmt='.2f',
-                       cmap='RdYlGn' if metric != 'max_drawdown' else 'RdYlGn_r',
+                       cmap='RdYlGn' if metric not in ['max_drawdown', 'avg_trade_duration'] else 'RdYlGn_r',
                        mask=mask,
                        ax=axes[row, col])
             
