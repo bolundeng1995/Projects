@@ -589,6 +589,19 @@ class COFTradingStrategy:
         print(f"Average Win Trade Duration: {self.trade_tracker.metrics['avg_win_trade_duration']:.2f} days")
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
+    def reset_strategy(self, cof_data: Optional[pd.DataFrame] = None) -> None:
+        """Reset the strategy state to its initial condition.
+        
+        Args:
+            cof_data (Optional[pd.DataFrame]): If provided, use this as the new cof_data.
+                                              If None, keep the current cof_data.
+        """
+        if cof_data is not None:
+            self.cof_data = cof_data.copy()
+        self.trade_tracker = TradeTracker(self.initial_capital)
+        self.position = Position()
+        self.calculate_liquidity_stress()
+
     def grid_search(self, param_grid: Dict[str, List[float]], 
                    transaction_cost: float = 0.0, max_loss: float = 20,
                    max_position_size: int = 2, double_threshold: float = 2.5) -> pd.DataFrame:
@@ -610,6 +623,9 @@ class COFTradingStrategy:
         """
         results = []
         
+        # Store original cof_data
+        original_cof_data = self.cof_data.copy()
+        
         # Generate parameter combinations where entry_threshold > exit_threshold
         param_combinations = []
         for entry in param_grid['entry_threshold']:
@@ -623,8 +639,7 @@ class COFTradingStrategy:
         for params in param_combinations:
             try:
                 # Reset strategy state
-                self.trade_tracker = TradeTracker(self.initial_capital)
-                self.position = Position()
+                self.reset_strategy(original_cof_data)
                 
                 # Generate signals with current parameters
                 self.generate_signals(
@@ -762,17 +777,14 @@ def main():
     # Run strategy with best parameters
     best_params = results.iloc[0]
     
-    # Re-initialize strategy components
-    strategy.trade_tracker = TradeTracker(strategy.initial_capital)
-    strategy.position = Position()
-    
-    # Run strategy with best parameters
+    # Reset strategy state and run with best parameters
+    strategy.reset_strategy(cof_data)
     strategy.generate_signals(
         entry_threshold=best_params['entry_threshold'],
         exit_threshold=best_params['exit_threshold']
     )
     strategy.backtest()
-    strategy.calculate_performance_metrics()  # Calculate metrics for the best parameters
+    strategy.calculate_performance_metrics()
     strategy.plot_results()
 
 if __name__ == "__main__":
