@@ -735,6 +735,7 @@ class COFTradingStrategy:
         
         plt.tight_layout()
         plt.savefig('performance_grids.png')
+        plt.show()  # Display the plot in the notebook
         plt.close()
 
 def main():
