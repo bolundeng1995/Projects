@@ -210,7 +210,7 @@ class COFTradingStrategy:
             raise
 
     def generate_signals(self, entry_threshold: float = 2.0, exit_threshold: float = 0.5, 
-                        liquidity_threshold: Optional[float] = 0.01) -> None:
+                        liquidity_threshold: Optional[float] = None) -> None:
         """Generate trading signals based on COF mispricing and liquidity indicators.
         
         Args:
@@ -221,6 +221,11 @@ class COFTradingStrategy:
         try:
             self._calculate_cof_deviation()
             self._apply_signal_logic(entry_threshold, exit_threshold, liquidity_threshold)
+            
+            # Store thresholds in metrics
+            self.trade_tracker.metrics['entry_threshold'] = entry_threshold
+            self.trade_tracker.metrics['exit_threshold'] = exit_threshold
+            
             logger.info("Trading signals generated successfully")
             
         except Exception as e:
@@ -248,7 +253,7 @@ class COFTradingStrategy:
         self.cof_data['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore'].fillna(0)
 
     def _apply_signal_logic(self, entry_threshold: float, exit_threshold: float, 
-                          liquidity_threshold: Optional[float]) -> None:
+                          liquidity_threshold: Optional[float] = None) -> None:
         """Apply trading signal logic based on thresholds.
         
         Args:
@@ -570,6 +575,8 @@ class COFTradingStrategy:
     def _print_metrics(self) -> None:
         """Print strategy performance metrics."""
         print("\nStrategy Performance Metrics:")
+        print(f"Entry Threshold: {self.trade_tracker.metrics.get('entry_threshold', 'N/A'):.2f}")
+        print(f"Exit Threshold: {self.trade_tracker.metrics.get('exit_threshold', 'N/A'):.2f}")
         print(f"Number of Trades: {self.trade_tracker.metrics['num_trades']}")
         print(f"Total Return: {self.trade_tracker.metrics['total_return']:.2f}")
         print(f"Sharpe Ratio: {self.trade_tracker.metrics['sharpe_ratio']:.2f}")
@@ -581,8 +588,8 @@ class COFTradingStrategy:
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
     def grid_search(self, param_grid: Dict[str, List[float]], 
-                   transaction_cost: float = 0.0001, max_loss: float = 50,
-                   max_position_size: int = 2, double_threshold: float = 3.0) -> pd.DataFrame:
+                   transaction_cost: float = 0.0001, max_loss: float = 20,
+                   max_position_size: int = 2, double_threshold: float = 2.5) -> pd.DataFrame:
         """Perform grid search over parameter combinations.
         
         Args:
