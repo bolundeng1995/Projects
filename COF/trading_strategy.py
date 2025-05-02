@@ -483,7 +483,9 @@ class COFTradingStrategy:
                 'avg_win_pnl': self.trade_tracker.positions['pnl'][winning_trades].mean(),
                 'avg_loss_pnl': self.trade_tracker.positions['pnl'][losing_trades].mean(),
                 'avg_win_trade_duration': self.trade_tracker.positions['trade_duration'][winning_trades].mean(),
-                'avg_loss_trade_duration': self.trade_tracker.positions['trade_duration'][losing_trades].mean()
+                'avg_loss_trade_duration': self.trade_tracker.positions['trade_duration'][losing_trades].mean(),
+                'entry_threshold': self.trade_tracker.metrics.get('entry_threshold', 'N/A'),
+                'exit_threshold': self.trade_tracker.metrics.get('exit_threshold', 'N/A')
             }
             
             logger.info("Performance metrics calculated successfully")
