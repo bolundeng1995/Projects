@@ -363,7 +363,7 @@ class COFTradingStrategy:
                                         transaction_cost, current_zscore)
             
         if signal == 0 and self.position.size == 0:
-            self.trade_tracker.positions.loc[idx, self.trade_tracker.positions.columns.get_loc('capital')] = self.trade_tracker.base_capital
+            self.trade_tracker.positions.iloc[idx, self.trade_tracker.positions.columns.get_loc('capital')] = self.trade_tracker.base_capital
         if signal != 0 and self.position.size == 0:
             self._enter_new_position(idx, signal, price, current_date, transaction_cost)
         elif signal == 0 and self.position.size != 0:
