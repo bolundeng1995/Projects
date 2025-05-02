@@ -127,8 +127,6 @@ class TradeTracker:
         """
         pnl = position.size * (price - position.avg_entry_price)
         self.cumulative_pnl += pnl
-        self.base_capital += pnl  # Add PnL to base capital
-        self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
         self.positions.iloc[idx, self.positions.columns.get_loc('exit_price')] = price
         self.positions.iloc[idx, self.positions.columns.get_loc('pnl')] = pnl
         self.positions.iloc[idx, self.positions.columns.get_loc('cumulative_pnl')] = self.cumulative_pnl
