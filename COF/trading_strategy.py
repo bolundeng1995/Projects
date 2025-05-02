@@ -590,7 +590,7 @@ class COFTradingStrategy:
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
     def grid_search(self, param_grid: Dict[str, List[float]], 
-                   transaction_cost: float = 0.0001, max_loss: float = 20,
+                   transaction_cost: float = 0.0, max_loss: float = 20,
                    max_position_size: int = 2, double_threshold: float = 2.5) -> pd.DataFrame:
         """Perform grid search over parameter combinations.
         
@@ -633,12 +633,8 @@ class COFTradingStrategy:
                 )
                 
                 # Run backtest
-                self.backtest(
-                    transaction_cost=transaction_cost,
-                    max_loss=max_loss,
-                    double_threshold=double_threshold,
-                    max_position_size=max_position_size
-                )
+                self.backtest()
+                
                 
                 # Calculate performance metrics
                 self.calculate_performance_metrics()
