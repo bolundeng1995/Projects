@@ -772,6 +772,7 @@ def main():
         exit_threshold=best_params['exit_threshold']
     )
     strategy.backtest()
+    strategy.calculate_performance_metrics()  # Calculate metrics for the best parameters
     strategy.plot_results()
 
 if __name__ == "__main__":
