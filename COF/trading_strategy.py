@@ -452,6 +452,13 @@ class COFTradingStrategy:
         results_df['cof_predicted'] = self.cof_data['cof_predicted']
         results_df['cof_deviation'] = self.cof_data['cof_deviation']
         results_df['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore']
+        
+        # Format float columns to 2 decimal places
+        float_columns = ['capital', 'entry_price', 'exit_price', 'pnl', 
+                        'unrealized_pnl', 'cumulative_pnl', 'cof_actual', 'cof_predicted',
+                        'cof_deviation', 'cof_deviation_zscore']
+        results_df[float_columns] = results_df[float_columns].round(2)
+        
         results_df.to_csv('trading_results.csv')
         logger.info("Trading results saved to trading_results.csv with entry and exit reasons")
 
