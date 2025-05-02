@@ -712,26 +712,24 @@ class COFTradingStrategy:
                 columns='exit_threshold'
             )
             
-            # Plot heatmap
+            # Create mask for invalid combinations (where entry <= exit)
+            mask = np.zeros_like(pivot, dtype=bool)
+            for i, entry in enumerate(pivot.index):
+                for j, exit_val in enumerate(pivot.columns):
+                    if entry <= exit_val:
+                        mask[i, j] = True
+            
+            # Plot heatmap with mask
             sns.heatmap(pivot, 
                        annot=True, 
                        fmt='.2f',
                        cmap='RdYlGn' if metric != 'max_drawdown' else 'RdYlGn_r',
+                       mask=mask,
                        ax=axes[row, col])
             
             axes[row, col].set_title(f'{metric.replace("_", " ").title()}')
             axes[row, col].set_xlabel('Exit Threshold')
             axes[row, col].set_ylabel('Entry Threshold')
-            
-            # Add diagonal line to show where entry = exit
-            x = np.arange(len(pivot.columns))
-            y = np.arange(len(pivot.index))
-            X, Y = np.meshgrid(x, y)
-            mask = Y <= X  # Create mask for cells where entry <= exit
-            axes[row, col].pcolor(X, Y, mask, 
-                                alpha=0.3, 
-                                color='gray', 
-                                hatch='/')
         
         plt.tight_layout()
         plt.savefig('performance_grids.png')
