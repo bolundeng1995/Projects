@@ -289,7 +289,7 @@ def main():
         # Add predicted COF and deviation
         results_data['cof_predicted'] = analyzer.model_results['cof_predicted']
         results_data['cof_deviation'] = analyzer.model_results['cof_deviation']
-        results_data = results_data.drop(subset=['cof_deviation'])
+        results_data = results_data.dropna(subset=['cof_deviation'])
         
         # Save to Excel
         results_data.to_excel('COF_DATA.xlsx')
