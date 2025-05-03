@@ -5,53 +5,47 @@
 ### COF Prediction Model
 The strategy uses a quadratic regression model to predict COF levels:
 
-\[
-COF_{predicted} = \beta_0 + \beta_1 \cdot CFTC + \beta_2 \cdot CFTC^2 + \beta_3 \cdot Liquidity
-\]
+$$COF_{predicted} = \beta_0 + \beta_1 \cdot CFTC + \beta_2 \cdot CFTC^2 + \beta_3 \cdot Liquidity$$
 
 Where:
-- \(COF_{predicted}\) is the predicted COF level
-- \(CFTC\) is the CFTC position data
-- \(Liquidity\) is the liquidity stress indicator
-- \(\beta_i\) are the regression coefficients
+- $COF_{predicted}$ is the predicted COF level
+- $CFTC$ is the CFTC position data
+- $Liquidity$ is the liquidity stress indicator
+- $\beta_i$ are the regression coefficients
 
 ### Signal Generation
 
 #### Z-score Calculation
-\[
-Z_{score} = \frac{COF_{actual} - COF_{predicted}}{\sigma_{deviation}}
-\]
+$$Z_{score} = \frac{COF_{actual} - COF_{predicted}}{\sigma_{deviation}}$$
 
 Where:
-- \(COF_{actual}\) is the actual COF level
-- \(COF_{predicted}\) is the predicted COF level
-- \(\sigma_{deviation}\) is the standard deviation of the deviation
+- $COF_{actual}$ is the actual COF level
+- $COF_{predicted}$ is the predicted COF level
+- $\sigma_{deviation}$ is the standard deviation of the deviation
 
 #### Entry Conditions
-1. Z-score < -2.0 (for long positions)
+1. $Z_{score} < -2.0$ (for long positions)
 2. Raw deviation > threshold
 3. Liquidity stress < threshold
 
 #### Exit Conditions
-1. Z-score > 0 (mean reversion)
+1. $Z_{score} > 0$ (mean reversion)
 2. Stop-loss triggered
 3. Position management rules
 
 ### Position Management
 
 #### Position Sizing
-\[
-Position_{size} = Base_{size} \cdot (1 + \frac{|Z_{score}|}{2.5})
-\]
+$$Position_{size} = Base_{size} \cdot \left(1 + \frac{|Z_{score}|}{2.5}\right)$$
 
 Where:
-- \(Base_{size}\) is the initial position size
-- \(Z_{score}\) is the current z-score
+- $Base_{size}$ is the initial position size
+- $Z_{score}$ is the current z-score
 - Maximum position size is capped at 2x
 
 #### Risk Management
 1. Stop-loss: 20 points from entry
-2. Position doubling: Z-score > 2.5
+2. Position doubling: $Z_{score} > 2.5$
 3. Liquidity stress limits
 
 ## Implementation Details
@@ -105,31 +99,21 @@ def manage_positions(signals, data):
 ## Performance Metrics
 
 ### Returns Calculation
-\[
-Total_{Return} = \sum_{i=1}^{n} (Position_{i} \cdot Return_{i})
-\]
+$$Total_{Return} = \sum_{i=1}^{n} (Position_{i} \cdot Return_{i})$$
 
 ### Risk Metrics
 1. Sharpe Ratio:
-\[
-Sharpe = \frac{Return_{mean}}{Return_{std}} \cdot \sqrt{252}
-\]
+$$Sharpe = \frac{Return_{mean}}{Return_{std}} \cdot \sqrt{252}$$
 
 2. Maximum Drawdown:
-\[
-MDD = \max_{t} \left( \frac{Peak_{t} - Value_{t}}{Peak_{t}} \right)
-\]
+$$MDD = \max_{t} \left( \frac{Peak_{t} - Value_{t}}{Peak_{t}} \right)$$
 
 ### Trade Statistics
 1. Win Rate:
-\[
-Win_{Rate} = \frac{Winning_{Trades}}{Total_{Trades}}
-\]
+$$Win_{Rate} = \frac{Winning_{Trades}}{Total_{Trades}}$$
 
 2. Average Win/Loss:
-\[
-Avg_{Win/Loss} = \frac{Avg_{Win}}{Avg_{Loss}}
-\]
+$$Avg_{Win/Loss} = \frac{Avg_{Win}}{Avg_{Loss}}$$
 
 ## Optimization
 
