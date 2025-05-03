@@ -12,10 +12,17 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 logger = logging.getLogger(__name__)
 
 class SPXCOFAnalyzer:
-    def __init__(self):
-        """Initialize the SPX COF analyzer"""
+    def __init__(self, cof_term: str = "1Y COF"):
+        """Initialize the SPX COF analyzer
+        
+        Parameters:
+        -----------
+        cof_term : str, default="1Y COF"
+            The COF term to analyze (e.g., "1Y COF", "3M COF", etc.)
+        """
         self.data = None
         self.model_results = None
+        self.cof_term = cof_term  # The value to predict or train
         
     def load_data_from_excel(self, file_path='COF_DATA.xlsx'):
         """
@@ -38,7 +45,7 @@ class SPXCOFAnalyzer:
             
             # Ensure all required columns are present
             required_columns = [
-                '1Y COF', 'cftc_positions',
+                self.cof_term, 'cftc_positions',
                 'fed_funds_sofr_spread'
             ]
             
@@ -58,7 +65,7 @@ class SPXCOFAnalyzer:
             results = []
             
             for i in range(window_size, len(self.data)):
-                window_data = self.data.iloc[i-window_size:i]
+                window_data = self.data.iloc[i-window_size:i+1]
                 
                 # Create quadratic terms for CFTC positions
                 X = pd.DataFrame({
@@ -66,7 +73,7 @@ class SPXCOFAnalyzer:
                     'cftc_positions_squared': window_data['cftc_positions'] ** 2
                 })
                 X = sm.add_constant(X)  # Add constant term
-                y = window_data['1Y COF']
+                y = window_data[self.cof_term]
                 
                 model = OLS(y, X).fit()
                 
@@ -80,9 +87,9 @@ class SPXCOFAnalyzer:
                 last_X = last_X[X.columns]
                 
                 results.append({
-                    'date': self.data.index[i-1],
-                    'cof_actual': self.data['1Y COF'].iloc[i-1],
-                    'cof_predicted': model.predict(last_X)[0],
+                    'date': self.data.index[i],
+                    'cof_actual': self.data[self.cof_term].iloc[i],
+                    'cof_predicted': model.predict(last_X)[0] + self.data['fed_funds_sofr_spread'].iloc[i],
                     'r_squared': model.rsquared,
                     'quadratic_coef': model.params['cftc_positions_squared'],
                     'linear_coef': model.params['cftc_positions'],
@@ -90,6 +97,7 @@ class SPXCOFAnalyzer:
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
+            self.model_results.to_excel('Model_Results.xlsx')
             logger.info("Quadratic model training completed successfully")
             
         except Exception as e:
@@ -117,7 +125,7 @@ class SPXCOFAnalyzer:
             liquidity_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].corr()
             
             # Calculate rolling correlation
-            window_size = 12  # 3 months
+            window_size = 26  # 6 months
             rolling_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].rolling(window_size).corr()
             
             # Store results
@@ -141,28 +149,28 @@ class SPXCOFAnalyzer:
             # Plot actual vs predicted COF
             plt.subplot(3, 1, 1)
             plt.plot(self.model_results.index, self.model_results['cof_actual'], 
-                    label='Actual COF', color='blue')
+                    label=f'Actual {self.cof_term}', color='blue')
             plt.plot(self.model_results.index, self.model_results['cof_predicted'], 
-                    label='Predicted COF', color='red', linestyle='--')
-            plt.title('SPX Cost of Financing: Actual vs Predicted')
+                    label=f'Predicted {self.cof_term}', color='red', linestyle='--')
+            plt.title(f'SPX Cost of Financing: Actual vs Predicted')
             plt.legend()
             plt.grid(True)
             
             # Plot COF deviation
             plt.subplot(3, 1, 2)
             plt.plot(self.model_results.index, self.model_results['cof_deviation'], 
-                    label='COF Deviation', color='green')
-            plt.title('COF Deviation from Fair Value')
+                    label=f'{self.cof_term} Deviation', color='green')
+            plt.title(f'{self.cof_term} Deviation from Fair Value')
             plt.legend()
             plt.grid(True)
             
             # Plot actual COF vs CFTC positions with quadratic fit
             plt.subplot(3, 1, 3)
-            plt.scatter(self.data['cftc_positions'], self.data['1Y COF'], 
-                       alpha=0.5, color='blue', label='COF vs CFTC Positions')
+            plt.scatter(self.data['cftc_positions'], self.data[self.cof_term], 
+                       alpha=0.5, color='blue', label=f'{self.cof_term} vs CFTC Positions')
             
             # Add quadratic regression line
-            z = np.polyfit(self.data['cftc_positions'], self.data['1Y COF'], 2)
+            z = np.polyfit(self.data['cftc_positions'], self.data[self.cof_term], 2)
             p = np.poly1d(z)
             x_sorted = np.sort(self.data['cftc_positions'])
             plt.plot(x_sorted, p(x_sorted), 
@@ -170,14 +178,14 @@ class SPXCOFAnalyzer:
                     label=f'Quadratic Fit (y={z[0]:.2f}x²+{z[1]:.2f}x+{z[2]:.2f})')
             
             plt.xlabel('CFTC Positions')
-            plt.ylabel('Actual COF')
-            plt.title('COF vs CFTC Positions Scatter Plot with Quadratic Fit')
+            plt.ylabel(f'Actual {self.cof_term}')
+            plt.title(f'{self.cof_term} vs CFTC Positions Scatter Plot with Quadratic Fit')
             plt.legend()
             plt.grid(True)
             
             # Add R-squared value
             y_pred = p(self.data['cftc_positions'])
-            r2 = r2_score(self.data['1Y COF'], y_pred)
+            r2 = r2_score(self.data[self.cof_term], y_pred)
             plt.text(0.05, 0.95, f'R² = {r2:.2f}', 
                     transform=plt.gca().transAxes, 
                     bbox=dict(facecolor='white', alpha=0.8))
@@ -262,8 +270,8 @@ class SPXCOFAnalyzer:
             raise
 
 def main():
-    # Initialize analyzer
-    analyzer = SPXCOFAnalyzer()
+    # Initialize analyzer with specific COF term
+    analyzer = SPXCOFAnalyzer(cof_term="1Y COF")  # Can be changed to any COF term
     
     # Load data from Excel
     analyzer.load_data_from_excel('COF_DATA.xlsx')
@@ -281,6 +289,7 @@ def main():
         # Add predicted COF and deviation
         results_data['cof_predicted'] = analyzer.model_results['cof_predicted']
         results_data['cof_deviation'] = analyzer.model_results['cof_deviation']
+        results_data = results_data.drop(subset=['cof_deviation'])
         
         # Save to Excel
         results_data.to_excel('COF_DATA.xlsx')

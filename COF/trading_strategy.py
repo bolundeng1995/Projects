@@ -168,19 +168,21 @@ class COFTradingStrategy:
         position (Position): Object to manage current position
     """
 
-    def __init__(self, cof_data: pd.DataFrame, liquidity_data: pd.DataFrame, initial_capital: float = 0):
+    def __init__(self, cof_data: pd.DataFrame, liquidity_data: pd.DataFrame, initial_capital: float = 0, cof_term: str = "cof"):
         """Initialize the COF trading strategy.
         
         Args:
             cof_data (pd.DataFrame): DataFrame containing COF analysis results
             liquidity_data (pd.DataFrame): DataFrame containing liquidity indicators
             initial_capital (float): Starting capital for backtesting
+            cof_term (str): The COF term to analyze (e.g., "1Y COF", "3M COF", etc.)
         """
         self.cof_data = cof_data
         self.liquidity_data = liquidity_data
         self.initial_capital = initial_capital
         self.trade_tracker = TradeTracker(initial_capital)
         self.position = Position()
+        self.cof_term = cof_term  # The value to predict or train
 
     def calculate_liquidity_stress(self) -> None:
         """Calculate a composite liquidity stress indicator.
@@ -446,15 +448,16 @@ class COFTradingStrategy:
     def _save_results(self) -> None:
         """Save trading results to CSV file."""
         results_df = self.trade_tracker.positions.copy()
-        results_df['cof_actual'] = self.cof_data['cof_actual']
-        results_df['cof_predicted'] = self.cof_data['cof_predicted']
-        results_df['cof_deviation'] = self.cof_data['cof_deviation']
-        results_df['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore']
+        results_df[f'{self.cof_term}_actual'] = self.cof_data[f'{self.cof_term}_actual']
+        results_df[f'{self.cof_term}_predicted'] = self.cof_data[f'{self.cof_term}_predicted']
+        results_df[f'{self.cof_term}_deviation'] = self.cof_data[f'{self.cof_term}_deviation']
+        results_df[f'{self.cof_term}_deviation_zscore'] = self.cof_data[f'{self.cof_term}_deviation_zscore']
         
         # Format float columns to 2 decimal places
         float_columns = ['capital', 'entry_price', 'exit_price', 'pnl', 
-                        'unrealized_pnl', 'cumulative_pnl', 'cof_actual', 'cof_predicted',
-                        'cof_deviation', 'cof_deviation_zscore']
+                        'unrealized_pnl', 'cumulative_pnl', f'{self.cof_term}_actual', 
+                        f'{self.cof_term}_predicted', f'{self.cof_term}_deviation', 
+                        f'{self.cof_term}_deviation_zscore']
         results_df[float_columns] = results_df[float_columns].round(2)
         
         results_df.to_csv('trading_results.csv')
@@ -602,15 +605,19 @@ class COFTradingStrategy:
         print(f"Average Win Trade Duration: {self.trade_tracker.metrics['avg_win_trade_duration']:.2f} days")
         print(f"Average Loss Trade Duration: {self.trade_tracker.metrics['avg_loss_trade_duration']:.2f} days")
 
-    def reset_strategy(self, cof_data: Optional[pd.DataFrame] = None) -> None:
+    def reset_strategy(self, cof_data: Optional[pd.DataFrame] = None, liquidity_data: Optional[pd.DataFrame] = None) -> None:
         """Reset the strategy state to its initial condition.
         
         Args:
             cof_data (Optional[pd.DataFrame]): If provided, use this as the new cof_data.
                                               If None, keep the current cof_data.
+            liquidity_data (Optional[pd.DataFrame]): If provided, use this as the new liquidity_data.
+                                                    If None, keep the current liquidity_data.
         """
         if cof_data is not None:
             self.cof_data = cof_data.copy()
+        if liquidity_data is not None:
+            self.liquidity_data = liquidity_data.copy()
         self.trade_tracker = TradeTracker(self.initial_capital)
         self.position = Position()
         self.calculate_liquidity_stress()
@@ -636,8 +643,9 @@ class COFTradingStrategy:
         """
         results = []
         
-        # Store original cof_data
+        # Store original data
         original_cof_data = self.cof_data.copy()
+        original_liquidity_data = self.liquidity_data.copy()
         
         # Generate parameter combinations where entry_threshold > exit_threshold
         param_combinations = []
@@ -652,7 +660,7 @@ class COFTradingStrategy:
         for params in param_combinations:
             try:
                 # Reset strategy state
-                self.reset_strategy(original_cof_data)
+                self.reset_strategy(original_cof_data, original_liquidity_data)
                 
                 # Generate signals with current parameters
                 self.generate_signals(
@@ -757,16 +765,19 @@ def main():
     # Load data from Excel
     data = pd.read_excel('COF_DATA.xlsx', index_col=0)
     
+    # Initialize strategy first to get cof_term
+    strategy = COFTradingStrategy(pd.DataFrame(), pd.DataFrame(), cof_term="1Y COF")
+    
     # Prepare data for strategy
     cof_data = pd.DataFrame({
-        'cof_actual': data['cof'],
-        'cof_predicted': data['cof_predicted']
+        f'{strategy.cof_term}_actual': data[strategy.cof_term],
+        f'{strategy.cof_term}_predicted': data[f'{strategy.cof_term}_predicted']
     })
     
     liquidity_data = data[['fed_funds_sofr_spread']]
     
-    # Initialize strategy
-    strategy = COFTradingStrategy(cof_data, liquidity_data)
+    # Reset strategy with actual data
+    strategy.reset_strategy(cof_data, liquidity_data)
     strategy.calculate_liquidity_stress()
     
     # Define parameter grid for grid search
@@ -786,7 +797,7 @@ def main():
     best_params = results.iloc[0]
     
     # Reset strategy state and run with best parameters
-    strategy.reset_strategy(cof_data)
+    strategy.reset_strategy(cof_data, liquidity_data)
     strategy.generate_signals(
         entry_threshold=best_params['entry_threshold'],
         exit_threshold=best_params['exit_threshold']
