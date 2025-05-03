@@ -238,19 +238,19 @@ class COFTradingStrategy:
         This method calculates the deviation between actual and predicted COF levels
         and computes the rolling z-score of this deviation.
         """
-        self.cof_data['cof_deviation'] = (
-            self.cof_data['cof_actual'] - self.cof_data['cof_predicted']
+        self.cof_data[f'{self.cof_term}_deviation'] = (
+            self.cof_data[f'{self.cof_term}_actual'] - self.cof_data[f'{self.cof_term}_predicted']
         )
         
         window_size = 52
-        rolling_mean = self.cof_data['cof_deviation'].rolling(window=window_size, min_periods=10).mean()
-        rolling_std = self.cof_data['cof_deviation'].rolling(window=window_size, min_periods=10).std()
-        self.cof_data['cof_deviation_zscore'] = (
-            self.cof_data['cof_deviation'] - rolling_mean
+        rolling_mean = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).mean()
+        rolling_std = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).std()
+        self.cof_data[f'{self.cof_term}_deviation_zscore'] = (
+            self.cof_data[f'{self.cof_term}_deviation'] - rolling_mean
         ) / rolling_std
         
         # Fill NaN values with 0
-        self.cof_data['cof_deviation_zscore'] = self.cof_data['cof_deviation_zscore'].fillna(0)
+        self.cof_data[f'{self.cof_term}_deviation_zscore'] = self.cof_data[f'{self.cof_term}_deviation_zscore'].fillna(0)
 
     def _apply_signal_logic(self, entry_threshold: float, exit_threshold: float, 
                           liquidity_threshold: Optional[float] = None) -> None:
@@ -269,22 +269,22 @@ class COFTradingStrategy:
         
         if liquidity_threshold is None:
             long_condition = (
-                (self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
-                (self.cof_data['cof_deviation'] < -deviation_entry_threshold)
+                (self.cof_data[f'{self.cof_term}_deviation_zscore'] < -entry_threshold) &
+                (self.cof_data[f'{self.cof_term}_deviation'] < -deviation_entry_threshold)
             )
             short_condition = (
-                (self.cof_data['cof_deviation_zscore'] > entry_threshold) &
-                (self.cof_data['cof_deviation'] > deviation_entry_threshold)
+                (self.cof_data[f'{self.cof_term}_deviation_zscore'] > entry_threshold) &
+                (self.cof_data[f'{self.cof_term}_deviation'] > deviation_entry_threshold)
             )
         else:
             long_condition = (
-                ((self.cof_data['cof_deviation_zscore'] < -entry_threshold) &
-                 (self.cof_data['cof_deviation'] < -deviation_entry_threshold)) &
+                ((self.cof_data[f'{self.cof_term}_deviation_zscore'] < -entry_threshold) &
+                 (self.cof_data[f'{self.cof_term}_deviation'] < -deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             short_condition = (
-                ((self.cof_data['cof_deviation_zscore'] > entry_threshold) &
-                 (self.cof_data['cof_deviation'] > deviation_entry_threshold)) &
+                ((self.cof_data[f'{self.cof_term}_deviation_zscore'] > entry_threshold) &
+                 (self.cof_data[f'{self.cof_term}_deviation'] > deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
         
@@ -293,13 +293,13 @@ class COFTradingStrategy:
         
         # Apply exit conditions
         long_exit = (
-            ((self.cof_data['cof_deviation_zscore'] > -exit_threshold) |
-            (self.cof_data['cof_deviation'] > -deviation_exit_threshold)) &
+            ((self.cof_data[f'{self.cof_term}_deviation_zscore'] > -exit_threshold) |
+            (self.cof_data[f'{self.cof_term}_deviation'] > -deviation_exit_threshold)) &
             (self.cof_data['signal'].shift(1) == 1)
         )
         short_exit = (
-            ((self.cof_data['cof_deviation_zscore'] < exit_threshold) |
-            (self.cof_data['cof_deviation'] < deviation_exit_threshold)) &
+            ((self.cof_data[f'{self.cof_term}_deviation_zscore'] < exit_threshold) |
+            (self.cof_data[f'{self.cof_term}_deviation'] < deviation_exit_threshold)) &
             (self.cof_data['signal'].shift(1) == -1)
         )
         
@@ -309,12 +309,12 @@ class COFTradingStrategy:
         # Maintain positions until exit threshold is crossed
         for i in range(1, len(self.cof_data)):
             if self.cof_data['signal'].iloc[i - 1] == 1:
-                if (self.cof_data['cof_deviation_zscore'].iloc[i] < -exit_threshold and 
-                    self.cof_data['cof_deviation'].iloc[i] < -deviation_exit_threshold):
+                if (self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[i] < -exit_threshold and 
+                    self.cof_data[f'{self.cof_term}_deviation'].iloc[i] < -deviation_exit_threshold):
                     self.cof_data['signal'].iloc[i] = 1  # maintain long position
             elif self.cof_data['signal'].iloc[i - 1] == -1:
-                if (self.cof_data['cof_deviation_zscore'].iloc[i] > exit_threshold and 
-                    self.cof_data['cof_deviation'].iloc[i] > deviation_exit_threshold):
+                if (self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[i] > exit_threshold and 
+                    self.cof_data[f'{self.cof_term}_deviation'].iloc[i] > deviation_exit_threshold):
                     self.cof_data['signal'].iloc[i] = -1  # maintain short position
 
     def backtest(self, transaction_cost: float = 0.0, max_loss: float = 20,
@@ -334,7 +334,7 @@ class COFTradingStrategy:
             for i in range(1, len(self.cof_data)):
                 self._process_trading_day(i, transaction_cost, max_loss, 
                                        double_threshold, max_position_size, prev_price)
-                prev_price = self.cof_data['cof_actual'].iloc[i]
+                prev_price = self.cof_data[f'{self.cof_term}_actual'].iloc[i]
             
             self._save_results()
             self.calculate_performance_metrics()
@@ -358,9 +358,9 @@ class COFTradingStrategy:
             prev_price (Optional[float]): Previous day's price
         """
         signal = self.cof_data['signal'].iloc[idx]
-        price = self.cof_data['cof_actual'].iloc[idx]
+        price = self.cof_data[f'{self.cof_term}_actual'].iloc[idx]
         current_date = self.cof_data.index[idx]
-        current_zscore = self.cof_data['cof_deviation_zscore'].iloc[idx]
+        current_zscore = self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[idx]
         
         if self.position.size != 0:
             self._handle_existing_position(idx, price, prev_price, max_loss, 
@@ -427,7 +427,7 @@ class COFTradingStrategy:
         self.position.entry_date = current_date
         
         # Determine entry reason based on signal and z-score
-        current_zscore = self.cof_data['cof_deviation_zscore'].iloc[idx]
+        current_zscore = self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[idx]
         if signal > 0:
             enter_reason = f'long_signal_zscore_{current_zscore:.2f}'
         else:
