@@ -78,7 +78,7 @@ class SPXCOFAnalyzer:
     
     def _find_optimal_smoothing(self, X, y, n_splits=5):
         """Find optimal smoothing parameter using cross-validation"""
-        from scipy.interpolate import BSpline, make_lsq_spline
+        from scipy.interpolate import make_smoothing_spline
         
         # Define range of smoothing parameters to try - using log spacing
         smoothing_factors = np.logspace(1, 5, 100)  # 100 values from 10 to 100000 on log scale
@@ -99,19 +99,8 @@ class SPXCOFAnalyzer:
                 X_train_sorted = X_train[sort_idx]
                 y_train_sorted = y_train[sort_idx]
                 
-                # Create knots for quadratic-like shape
-                knots = np.array([
-                    X_train_sorted.min(),  # start knot
-                    (X_train_sorted.min() + X_train_sorted.max()) / 2,  # middle knot
-                    X_train_sorted.max()   # end knot
-                ])
-                
-                # Create B-spline basis
-                k = 3  # cubic spline
-                t = np.r_[(X_train_sorted[0],) * k, knots, (X_train_sorted[-1],) * k]
-                
-                # Fit spline with explicit knots
-                spline = make_lsq_spline(X_train_sorted, y_train_sorted, t, k=k)
+                # Create spline with smoothing parameter
+                spline = make_smoothing_spline(X_train_sorted, y_train_sorted, lam=s)
                 
                 # Predict on validation set
                 y_pred = spline(X_val)
@@ -131,7 +120,7 @@ class SPXCOFAnalyzer:
     def visualize_smoothing_tradeoff(self):
         """Visualize the trade-off between smoothness and fit"""
         try:
-            from scipy.interpolate import BSpline, make_lsq_spline
+            from scipy.interpolate import make_smoothing_spline
             
             # Sort data
             sort_idx = self.data['cftc_positions'].argsort()
@@ -151,20 +140,9 @@ class SPXCOFAnalyzer:
             
             x_plot = np.linspace(X_sorted.min(), X_sorted.max(), 1000)
             
-            # Create knots for quadratic-like shape
-            knots = np.array([
-                X_sorted.min(),  # start knot
-                (X_sorted.min() + X_sorted.max()) / 2,  # middle knot
-                X_sorted.max()   # end knot
-            ])
-            
-            # Create B-spline basis
-            k = 3  # cubic spline
-            t = np.r_[(X_sorted[0],) * k, knots, (X_sorted[-1],) * k]
-            
             for s, color, label in zip(smoothing_levels, colors, labels):
-                # Create spline with explicit knots
-                spline = make_lsq_spline(X_sorted, y_sorted, t, k=k)
+                # Create spline with smoothing parameter
+                spline = make_smoothing_spline(X_sorted, y_sorted, lam=s)
                 ax1.plot(x_plot, spline(x_plot), color=color, label=label, alpha=0.8)
             
             ax1.scatter(X_sorted, y_sorted, color='gray', alpha=0.3, label='Data Points')
