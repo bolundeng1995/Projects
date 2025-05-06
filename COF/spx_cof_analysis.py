@@ -79,7 +79,7 @@ class SPXCOFAnalyzer:
     def _find_optimal_smoothing(self, X, y, n_splits=5):
         """Find optimal smoothing parameter using cross-validation with controlled knots"""
         # Define range of smoothing parameters to try
-        smoothing_factors = np.logspace(0, 3, 20)  # from 1 to 1000
+        smoothing_factors = np.logspace(0, 4, 100)  # from 1 to 1000
         cv_scores = []
         monotonic_scores = []  # track scores for monotonic fits
         
