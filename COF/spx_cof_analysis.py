@@ -85,21 +85,24 @@ class SPXCOFAnalyzer:
             scores = []
             
             for train_idx, val_idx in kf.split(X):
+                # Get training and validation data
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
                 
-                # Sort training data by X values for spline fitting
-                sort_idx = np.argsort(X_train)
-                X_train_sorted = X_train[sort_idx]
-                y_train_sorted = y_train[sort_idx]
+                # Create pairs of (X, y) and sort by X
+                train_pairs = list(zip(X_train, y_train))
+                train_pairs.sort(key=lambda x: x[0])  # Sort by X value
+                X_train_sorted = np.array([x for x, _ in train_pairs])
+                y_train_sorted = np.array([y for _, y in train_pairs])
                 
                 # Create spline with smoothing parameter
                 spline = make_smoothing_spline(X_train_sorted, y_train_sorted, lam=s)
                 
-                # Sort validation data by X values for prediction
-                val_sort_idx = np.argsort(X_val)
-                X_val_sorted = X_val[val_sort_idx]
-                y_val_sorted = y_val[val_sort_idx]
+                # Sort validation data the same way
+                val_pairs = list(zip(X_val, y_val))
+                val_pairs.sort(key=lambda x: x[0])  # Sort by X value
+                X_val_sorted = np.array([x for x, _ in val_pairs])
+                y_val_sorted = np.array([y for _, y in val_pairs])
                 
                 # Predict on validation set
                 y_pred = spline(X_val_sorted)
