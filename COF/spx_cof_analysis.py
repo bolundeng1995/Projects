@@ -208,10 +208,15 @@ class SPXCOFAnalyzer:
             plt.scatter(self.data['cftc_positions'], self.data[self.cof_term], 
                        alpha=0.5, color='blue', label=f'{self.cof_term} vs CFTC Positions')
             
+            # Sort data for spline fitting
+            sort_idx = self.data['cftc_positions'].argsort()
+            x_sorted = self.data['cftc_positions'].iloc[sort_idx]
+            y_sorted = self.data[self.cof_term].iloc[sort_idx]
+            
             # Add spline regression line
-            spline = UnivariateSpline(self.data['cftc_positions'], self.data[self.cof_term], k=3, s=self.model_results['spline_smoothing'].iloc[-1])
-            x_sorted = np.sort(self.data['cftc_positions'])
-            plt.plot(x_sorted, spline(x_sorted), 
+            spline = UnivariateSpline(x_sorted, y_sorted, k=3, s=self.model_results['spline_smoothing'].iloc[-1])
+            x_plot = np.linspace(x_sorted.min(), x_sorted.max(), 1000)
+            plt.plot(x_plot, spline(x_plot), 
                     "r--", alpha=0.8, 
                     label=f'Spline Fit (smoothing={self.model_results["spline_smoothing"].iloc[-1]:.2f})')
             
@@ -222,8 +227,8 @@ class SPXCOFAnalyzer:
             plt.grid(True)
             
             # Add R-squared value
-            y_pred = spline(self.data['cftc_positions'])
-            r2 = r2_score(self.data[self.cof_term], y_pred)
+            y_pred = spline(x_sorted)
+            r2 = r2_score(y_sorted, y_pred)
             plt.text(0.05, 0.95, f'R² = {r2:.2f}', 
                     transform=plt.gca().transAxes, 
                     bbox=dict(facecolor='white', alpha=0.8))
