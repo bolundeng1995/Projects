@@ -75,7 +75,7 @@ class SPXCOFAnalyzer:
         from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(1, 6, 100)  # 100 values from 10 to 1000000 on log scale
+        smoothing_factors = np.logspace(4.7, 7, 30)  # 100 values from 50000 to 1000000 on log scale
         cv_scores = []
         
         # Use K-fold cross-validation
@@ -128,7 +128,7 @@ class SPXCOFAnalyzer:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
             
             # Plot 1: Different smoothing levels
-            smoothing_levels = [10.0, best_s, 1000.0]  # low, optimal, high
+            smoothing_levels = [1e5, best_s, 1e7]  # low, optimal, high
             colors = ['blue', 'red', 'green']
             labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
             
@@ -291,7 +291,7 @@ class SPXCOFAnalyzer:
             y_sorted = self.data[self.cof_term].iloc[sort_idx]
             
             # Add spline regression line
-            spline = UnivariateSpline(x_sorted, y_sorted, k=3, s=self.model_results['spline_smoothing'].iloc[-1])
+            spline = make_smoothing_spline(x_sorted, y_sorted, lam=self.model_results['spline_smoothing'].iloc[-1])
             x_plot = np.linspace(x_sorted.min(), x_sorted.max(), 1000)
             plt.plot(x_plot, spline(x_plot), 
                     "r--", alpha=0.8, 
@@ -395,6 +395,9 @@ def main():
     
     # Load data from Excel
     analyzer.load_data_from_excel('COF_DATA.xlsx')
+    
+    # Visualize smoothing trade-off
+    analyzer.visualize_smoothing_tradeoff()
     
     # Run analysis
     analyzer.train_model()
