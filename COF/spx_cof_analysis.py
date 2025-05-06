@@ -8,6 +8,7 @@ from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
 from scipy.interpolate import UnivariateSpline
+from sklearn.model_selection import TimeSeriesSplit
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -75,6 +76,101 @@ class SPXCOFAnalyzer:
         y_pred = spline(X['cftc_positions'])
         return np.sum((y - y_pred) ** 2)
     
+    def _find_optimal_smoothing(self, X, y, n_splits=5):
+        """Find optimal smoothing parameter using cross-validation"""
+        # Define range of smoothing parameters to try - now from 1 to 1000
+        smoothing_factors = np.logspace(0, 4, 100)  # from 1 to 1000
+        cv_scores = []
+        
+        # Use time series cross-validation
+        tscv = TimeSeriesSplit(n_splits=n_splits)
+        
+        for s in smoothing_factors:
+            scores = []
+            for train_idx, val_idx in tscv.split(X):
+                X_train, X_val = X[train_idx], X[val_idx]
+                y_train, y_val = y[train_idx], y[val_idx]
+                
+                # Sort training data
+                sort_idx = np.argsort(X_train)
+                X_train_sorted = X_train[sort_idx]
+                y_train_sorted = y_train[sort_idx]
+                
+                # Fit spline with minimum smoothing threshold
+                min_smoothing = len(X_train) * 0.5  # minimum smoothing threshold
+                actual_smoothing = max(s * len(X_train), min_smoothing)
+                spline = UnivariateSpline(X_train_sorted, y_train_sorted, k=3, s=actual_smoothing)
+                
+                # Predict on validation set
+                y_pred = spline(X_val)
+                score = r2_score(y_val, y_pred)
+                scores.append(score)
+            
+            cv_scores.append(np.mean(scores))
+        
+        # Find best smoothing parameter
+        best_s_idx = np.argmax(cv_scores)
+        best_s = smoothing_factors[best_s_idx]
+        
+        # Ensure minimum smoothing
+        min_smoothing = 0.5  # minimum smoothing factor
+        best_s = max(best_s, min_smoothing)
+        
+        return best_s, smoothing_factors, cv_scores
+
+    def visualize_smoothing_tradeoff(self):
+        """Visualize the trade-off between smoothness and fit"""
+        try:
+            # Sort data
+            sort_idx = self.data['cftc_positions'].argsort()
+            X_sorted = self.data['cftc_positions'].iloc[sort_idx].values
+            y_sorted = self.data[self.cof_term].iloc[sort_idx].values
+            
+            # Find optimal smoothing
+            best_s, smoothing_factors, cv_scores = self._find_optimal_smoothing(X_sorted, y_sorted)
+            
+            # Create figure with two subplots
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+            
+            # Plot 1: Different smoothing levels
+            smoothing_levels = [0.5, best_s, 100.0]  # low, optimal, high
+            colors = ['blue', 'red', 'green']
+            labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
+            
+            x_plot = np.linspace(X_sorted.min(), X_sorted.max(), 1000)
+            
+            for s, color, label in zip(smoothing_levels, colors, labels):
+                actual_smoothing = max(s * len(X_sorted), len(X_sorted) * 0.5)  # apply minimum smoothing
+                spline = UnivariateSpline(X_sorted, y_sorted, k=3, s=actual_smoothing)
+                ax1.plot(x_plot, spline(x_plot), color=color, label=label, alpha=0.8)
+            
+            ax1.scatter(X_sorted, y_sorted, color='gray', alpha=0.3, label='Data Points')
+            ax1.set_xlabel('CFTC Positions')
+            ax1.set_ylabel(f'{self.cof_term}')
+            ax1.set_title('Effect of Smoothing Parameter')
+            ax1.legend()
+            ax1.grid(True)
+            
+            # Plot 2: Cross-validation scores
+            ax2.semilogx(smoothing_factors, cv_scores, 'b-', label='CV Score')
+            ax2.axvline(x=best_s, color='r', linestyle='--', label=f'Optimal s={best_s:.2f}')
+            ax2.set_xlabel('Smoothing Parameter (s)')
+            ax2.set_ylabel('Cross-validation R² Score')
+            ax2.set_title('Smoothing Parameter Selection')
+            ax2.legend()
+            ax2.grid(True)
+            
+            plt.tight_layout()
+            plt.show()
+            
+            # Update the model with optimal smoothing
+            self.optimal_smoothing = best_s
+            logger.info(f"Optimal smoothing parameter: {best_s:.2f}")
+            
+        except Exception as e:
+            logger.error(f"Error in smoothing trade-off visualization: {str(e)}")
+            raise
+
     def train_model(self, window_size=52):  # 52 trading weeks = 1 year
         """Train rolling window regression model using monotonic spline"""
         try:
@@ -94,8 +190,15 @@ class SPXCOFAnalyzer:
                 X_sorted = X.iloc[sort_idx]
                 y_sorted = y.iloc[sort_idx]
                 
-                # Create monotonic spline
-                smoothing_factor = len(X) * 0.1  # initial smoothing parameter
+                # Find optimal smoothing for this window
+                best_s, _, _ = self._find_optimal_smoothing(
+                    X_sorted['cftc_positions'].values,
+                    y_sorted.values,
+                    n_splits=min(5, window_size//10)  # Adjust splits based on window size
+                )
+                
+                # Create monotonic spline with optimal smoothing
+                smoothing_factor = best_s * len(X)
                 spline = UnivariateSpline(
                     X_sorted['cftc_positions'],
                     y_sorted,
@@ -111,7 +214,7 @@ class SPXCOFAnalyzer:
                 
                 if not np.all(derivatives >= 0):
                     # If not monotonic, increase smoothing
-                    smoothing_factor = len(X) * 0.5  # increased smoothing
+                    smoothing_factor = best_s * len(X) * 2.0  # double the optimal smoothing
                     spline = UnivariateSpline(
                         X_sorted['cftc_positions'],
                         y_sorted,
