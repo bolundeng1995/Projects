@@ -77,20 +77,18 @@ class SPXCOFAnalyzer:
         return np.sum((y - y_pred) ** 2)
     
     def _find_optimal_smoothing(self, X, y, n_splits=5):
-        """Find optimal smoothing parameter using cross-validation with controlled knots"""
+        """Find optimal smoothing parameter using cross-validation"""
         from scipy.interpolate import BSpline, make_lsq_spline
         
-        # Define range of smoothing parameters to try - now using linear spacing
-        smoothing_factors = np.linspace(10, 20000, 500)  # 100 evenly spaced values from 1 to 1000
+        # Define range of smoothing parameters to try - using log spacing
+        smoothing_factors = np.logspace(1, 5, 100)  # 100 values from 10 to 100000 on log scale
         cv_scores = []
-        monotonic_scores = []  # track scores for monotonic fits
         
         # Use time series cross-validation
         tscv = TimeSeriesSplit(n_splits=n_splits)
         
         for s in smoothing_factors:
             scores = []
-            is_monotonic = True
             
             for train_idx, val_idx in tscv.split(X):
                 X_train, X_val = X[train_idx], X[val_idx]
@@ -102,7 +100,6 @@ class SPXCOFAnalyzer:
                 y_train_sorted = y_train[sort_idx]
                 
                 # Create knots for quadratic-like shape
-                # Use 3 knots to enforce a more quadratic shape
                 knots = np.array([
                     X_train_sorted.min(),  # start knot
                     (X_train_sorted.min() + X_train_sorted.max()) / 2,  # middle knot
@@ -116,13 +113,6 @@ class SPXCOFAnalyzer:
                 # Fit spline with explicit knots
                 spline = make_lsq_spline(X_train_sorted, y_train_sorted, t, k=k)
                 
-                # Check monotonicity
-                x_test = np.linspace(X_train_sorted.min(), X_train_sorted.max(), 1000)
-                derivatives = spline.derivative()(x_test)
-                
-                if not np.all(derivatives >= 0):
-                    is_monotonic = False
-                
                 # Predict on validation set
                 y_pred = spline(X_val)
                 score = r2_score(y_val, y_pred)
@@ -130,21 +120,11 @@ class SPXCOFAnalyzer:
             
             mean_score = np.mean(scores)
             cv_scores.append(mean_score)
-            
-            if is_monotonic:
-                monotonic_scores.append((s, mean_score))
         
         # Find best smoothing parameter
         best_s_idx = np.argmax(cv_scores)
         best_s = smoothing_factors[best_s_idx]
-        
-        # Log information about monotonicity
-        if monotonic_scores:
-            best_monotonic_s, best_monotonic_score = max(monotonic_scores, key=lambda x: x[1])
-            logger.info(f"Best monotonic smoothing: {best_monotonic_s:.2f} (R² = {best_monotonic_score:.3f})")
-            logger.info(f"Best overall smoothing: {best_s:.2f} (R² = {cv_scores[best_s_idx]:.3f})")
-        else:
-            logger.warning("No monotonic fits found, using best overall smoothing")
+        logger.info(f"Best smoothing parameter: {best_s:.2f} (R² = {cv_scores[best_s_idx]:.3f})")
         
         return best_s, smoothing_factors, cv_scores
 
@@ -185,13 +165,6 @@ class SPXCOFAnalyzer:
             for s, color, label in zip(smoothing_levels, colors, labels):
                 # Create spline with explicit knots
                 spline = make_lsq_spline(X_sorted, y_sorted, t, k=k)
-                
-                # Verify monotonicity
-                derivatives = spline.derivative()(x_plot)
-                if not np.all(derivatives >= 0):
-                    logger.warning(f"Smoothing level {s} does not maintain monotonicity")
-                    continue
-                
                 ax1.plot(x_plot, spline(x_plot), color=color, label=label, alpha=0.8)
             
             ax1.scatter(X_sorted, y_sorted, color='gray', alpha=0.3, label='Data Points')
