@@ -81,7 +81,7 @@ class SPXCOFAnalyzer:
         from scipy.interpolate import make_smoothing_spline
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(1, 5, 100)  # 100 values from 10 to 100000 on log scale
+        smoothing_factors = np.logspace(1, 6, 100)  # 100 values from 10 to 100000 on log scale
         cv_scores = []
         
         # Use time series cross-validation
