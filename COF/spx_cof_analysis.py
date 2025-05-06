@@ -8,7 +8,7 @@ from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
 from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline, make_lsq_spline
-from sklearn.model_selection import TimeSeriesSplit
+from sklearn.model_selection import KFold
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -69,28 +69,22 @@ class SPXCOFAnalyzer:
         y_pred = X @ params  # Matrix multiplication for prediction
         return np.sum((y - y_pred) ** 2)
     
-    def _spline_objective(self, params, X, y, knots):
-        """Objective function for spline regression"""
-        # Create spline basis functions
-        spline = UnivariateSpline(X['cftc_positions'], y, k=3, s=params[0])
-        y_pred = spline(X['cftc_positions'])
-        return np.sum((y - y_pred) ** 2)
-    
     def _find_optimal_smoothing(self, X, y, n_splits=5):
         """Find optimal smoothing parameter using cross-validation"""
         from scipy.interpolate import make_smoothing_spline
+        from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(1, 6, 100)  # 100 values from 10 to 100000 on log scale
+        smoothing_factors = np.logspace(1, 6, 100)  # 100 values from 10 to 1000000 on log scale
         cv_scores = []
         
-        # Use time series cross-validation
-        tscv = TimeSeriesSplit(n_splits=n_splits)
+        # Use K-fold cross-validation
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
         
         for s in smoothing_factors:
             scores = []
             
-            for train_idx, val_idx in tscv.split(X):
+            for train_idx, val_idx in kf.split(X):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
                 
@@ -172,7 +166,7 @@ class SPXCOFAnalyzer:
             logger.error(f"Error in smoothing trade-off visualization: {str(e)}")
             raise
 
-    def train_model(self, window_size=52):  # 52 trading weeks = 1 year
+    def train_model(self, window_size=104):  # 52 trading weeks = 1 year
         """Train rolling window regression model using monotonic spline with controlled knots"""
         try:
             from scipy.interpolate import make_smoothing_spline
@@ -199,22 +193,8 @@ class SPXCOFAnalyzer:
                     n_splits=min(5, window_size//10)
                 )
                 
-                # Create spline with controlled knots
-                n_knots = 5  # reduced number of knots
-                knots = np.linspace(X_sorted['cftc_positions'].min(), 
-                                  X_sorted['cftc_positions'].max(), 
-                                  n_knots)
+                # Create spline with optimal smoothing
                 spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s)
-                
-                # Ensure monotonicity
-                x_range = np.linspace(X_sorted['cftc_positions'].min(), 
-                                    X_sorted['cftc_positions'].max(), 
-                                    1000)
-                derivatives = spline.derivative()(x_range)
-                
-                if not np.all(derivatives >= 0):
-                    # If not monotonic, increase smoothing
-                    spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s*2)
                 
                 # Calculate predictions
                 y_pred = spline(X_sorted['cftc_positions'])
