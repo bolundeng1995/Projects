@@ -1,180 +1,160 @@
-# COF Trading Strategy
+# SPX Cost of Financing (COF) Analysis
 
-A sophisticated trading strategy based on Cost of Funds (COF) analysis, implementing mean reversion principles with dynamic position sizing and risk management.
+This project analyzes the relationship between SPX Cost of Financing (COF) and CFTC positions using a monotonic spline regression approach with time series cross-validation.
 
-## Overview
+## Technical Overview
 
-This strategy trades based on deviations between actual and predicted Cost of Funds (COF) levels, with the following key features:
+### Core Algorithm
+- Monotonic spline regression using `make_smoothing_spline`
+- Time series cross-validation (10-fold) without data shuffling
+- Rolling window analysis (52-week window)
+- Proper X-y pairing during sorting operations
+- Fed Funds-SOFR spread integration for liquidity analysis
 
-- Mean reversion trading based on COF mispricing
-- Dynamic position sizing with doubling down on extreme deviations
-- Comprehensive risk management with stop-loss protection
-- Liquidity stress consideration for trade entry
-- Detailed performance tracking and visualization
+### Key Technical Features
 
-## Strategy Components
-
-### 1. Signal Generation
-- Calculates COF deviation and its z-score using rolling windows
-- Generates trading signals based on z-score thresholds
-- Incorporates liquidity stress indicators for trade entry
-- Implements separate entry and exit thresholds
-
-### 2. Position Management
-- Dynamic position sizing with doubling down capability
-- Tracks average entry price for accurate PnL calculation
-- Implements absolute stop-loss protection
-- Records detailed trade information including entry/exit reasons
-
-### 3. Performance Tracking
-- Tracks daily and cumulative PnL
-- Records trade duration and exit reasons
-- Calculates key performance metrics:
-  - Total return
-  - Sharpe ratio
-  - Maximum drawdown
-  - Win rate
-  - Average win/loss PnL
-  - Average trade duration
-
-### 4. Visualization
-- Portfolio value over time
-- Daily mark-to-market performance
-- Trading positions visualization
-- Performance metrics summary
-
-## Usage
-
-1. Prepare your data:
-   - COF actual values
-   - COF predicted values
-   - Liquidity indicators (e.g., fed_funds_sofr_spread)
-
-2. Initialize the strategy:
+#### 1. Spline Fitting
 ```python
-strategy = COFTradingStrategy(cof_data, liquidity_data, initial_capital=1000000)
+# Optimal smoothing selection via cross-validation
+best_s, _, _ = self._find_optimal_smoothing(
+    X_sorted['cftc_positions'].values,
+    y_sorted.values,
+    n_splits=10
+)
+
+# Create spline with optimal smoothing
+spline = make_smoothing_spline(X_sorted, y_sorted, lam=best_s)
 ```
+- Uses `make_smoothing_spline` from scipy.interpolate
+- Ensures proper pairing of X (CFTC positions) and y (COF) values
+- Maintains monotonicity in the relationship
+- Adaptive smoothing parameter per window
 
-3. Generate signals:
+#### 2. Cross-Validation
 ```python
-strategy.generate_signals(
-    entry_threshold=2.0,    # Z-score threshold for entry
-    exit_threshold=0.5,     # Z-score threshold for exit
-    liquidity_threshold=0.01 # Optional liquidity stress threshold
+# Time series cross-validation
+kf = KFold(n_splits=10, shuffle=False)
+
+# Proper X-y pairing during sorting
+pairs = list(zip(X_train, y_train))
+pairs.sort(key=lambda x: x[0])
+```
+- 10-fold time series CV without shuffling
+- Preserves temporal order of data
+- Proper handling of X-y pairs during sorting
+- R² score for model evaluation
+
+#### 3. Rolling Window Analysis
+```python
+# 52-week rolling window
+window_size = 52  # 1 year of trading weeks
+
+# Adaptive smoothing per window
+best_s, _, _ = self._find_optimal_smoothing(
+    X_sorted['cftc_positions'].values,
+    y_sorted.values,
+    n_splits=min(10, window_size//10)
 )
 ```
+- 52-week window size for analysis
+- Adaptive smoothing parameter selection
+- Fed Funds-SOFR spread integration
+- Results saved to Excel for analysis
 
-4. Run backtest:
+## Implementation Details
+
+### Data Requirements
+Excel file ('COF_DATA.xlsx') must contain:
+- CFTC positions (numeric)
+- COF values (1Y COF by default)
+- Fed Funds-SOFR spread (numeric)
+
+### Dependencies
 ```python
-strategy.backtest(
-    transaction_cost=0.0001,  # Transaction cost as fraction
-    max_loss=50,             # Maximum loss in absolute terms
-    double_threshold=3.0,    # Z-score threshold for doubling down
-    max_position_size=2      # Maximum position size multiplier
-)
+numpy>=1.21.0
+pandas>=1.3.0
+matplotlib>=3.4.0
+seaborn>=0.11.0
+scipy>=1.7.0
+statsmodels>=0.13.0
+scikit-learn>=0.24.0
 ```
 
-5. View results:
-```python
-strategy.plot_results()
-```
+### Usage
 
-## Key Parameters
-
-### Signal Generation
-- `entry_threshold`: Z-score threshold for entering positions (default: 2.0)
-- `exit_threshold`: Z-score threshold for exiting positions (default: 0.5)
-- `liquidity_threshold`: Optional threshold for liquidity stress (default: 0.01)
-
-### Position Management
-- `max_loss`: Maximum loss in absolute terms (default: 50)
-- `double_threshold`: Z-score threshold for doubling down (default: 3.0)
-- `max_position_size`: Maximum position size multiplier (default: 2)
-
-### Transaction Costs
-- `transaction_cost`: Transaction cost as a fraction of trade value (default: 0.0001)
-
-## Output Files
-
-- `trading_results.csv`: Detailed trade records including:
-  - Position sizes
-  - Entry/exit prices
-  - PnL
-  - Trade duration
-  - Entry/exit reasons
-  - COF metrics
-
-## Performance Metrics
-
-The strategy calculates and displays:
-1. Total Return
-2. Sharpe Ratio
-3. Maximum Drawdown
-4. Win Rate
-5. Average Win/Loss PnL
-6. Average Trade Duration
-
-## Requirements
-
-- Python 3.7+
-- pandas
-- numpy
-- matplotlib
-- logging
-
-## Installation
-
+1. Install dependencies:
 ```bash
-pip install pandas numpy matplotlib
+pip install -r requirements.txt
 ```
 
-## Example
+2. Prepare data in 'COF_DATA.xlsx'
 
+3. Run analysis:
 ```python
-# Load data
-data = pd.read_excel('COF_DATA.xlsx', index_col=0)
-
-# Prepare data
-cof_data = pd.DataFrame({
-    'cof_actual': data['cof'],
-    'cof_predicted': data['cof_predicted']
-})
-liquidity_data = data[['fed_funds_sofr_spread']]
-
-# Initialize and run strategy
-strategy = COFTradingStrategy(cof_data, liquidity_data)
-strategy.calculate_liquidity_stress()
-strategy.generate_signals()
-strategy.backtest()
-strategy.plot_results()
+python spx_cof_analysis.py
 ```
 
-## Strategy Logic
+4. View results:
+- Model results: 'Model_Results.xlsx'
+- Updated data: 'COF_DATA.xlsx'
+- Visualizations: Displayed during execution
 
-1. **Entry Conditions**:
-   - Long: COF deviation z-score < -entry_threshold
-   - Short: COF deviation z-score > entry_threshold
-   - Optional: Liquidity stress below threshold
+### Output Files
 
-2. **Exit Conditions**:
-   - Signal reversal (z-score crosses exit_threshold)
-   - Stop-loss triggered (absolute loss exceeds max_loss)
-   - Position doubling (z-score exceeds double_threshold)
+1. Model Results ('Model_Results.xlsx'):
+   - Predicted COF values
+   - R² scores
+   - Optimal smoothing parameters
+   - COF deviations
 
-3. **Position Management**:
-   - Initial position size: 1
-   - Doubling down when z-score exceeds double_threshold
-   - Maximum position size: max_position_size
-   - Stop-loss: max_loss in absolute terms
+2. Visualizations:
+   - Smoothing trade-off analysis
+   - Actual vs predicted COF
+   - COF deviations
+   - Liquidity analysis plots
 
-## Performance Analysis
+## Technical Notes
 
-The strategy provides comprehensive performance analysis through:
-1. Visual charts of portfolio value and positions
-2. Detailed trade records in CSV format
-3. Key performance metrics
-4. Trade duration and win/loss analysis
+### Data Handling
+- Proper X-y pairing during sorting operations
+- Temporal order preservation in cross-validation
+- Monotonicity maintenance in spline fitting
+- Handling of missing values via forward fill
+
+### Model Assumptions
+- Monotonic relationship between CFTC positions and COF
+- Stationarity of the relationship within each window
+- Sufficient data points for reliable cross-validation
+- Proper liquidity conditions for valid predictions
+
+### Performance Considerations
+- Results sensitive to window size (52 weeks)
+- Smoothing parameter selection via cross-validation
+- Proper handling of time series dependencies
+- Integration of liquidity indicators
+
+## Future Enhancements
+
+### Planned Improvements
+1. Alternative smoothing methods
+2. Enhanced cross-validation strategies
+3. Additional liquidity metrics
+4. Real-time monitoring capabilities
+
+### Potential Extensions
+1. Machine learning integration
+2. Automated parameter optimization
+3. Advanced visualization tools
+4. Real-time data processing
 
 ## Contributing
 
-Feel free to submit issues and enhancement requests! 
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details. 
