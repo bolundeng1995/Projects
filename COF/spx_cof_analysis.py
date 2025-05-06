@@ -69,7 +69,7 @@ class SPXCOFAnalyzer:
         y_pred = X @ params  # Matrix multiplication for prediction
         return np.sum((y - y_pred) ** 2)
     
-    def _find_optimal_smoothing(self, X, y, n_splits=5):
+    def _find_optimal_smoothing(self, X, y, n_splits=10):
         """Find optimal smoothing parameter using cross-validation"""
         from scipy.interpolate import make_smoothing_spline
         from sklearn.model_selection import KFold
@@ -174,7 +174,7 @@ class SPXCOFAnalyzer:
             logger.error(f"Error in smoothing trade-off visualization: {str(e)}")
             raise
 
-    def train_model(self, window_size=104):  # 52 trading weeks = 1 year
+    def train_model(self, window_size=52):  # 52 trading weeks = 1 year
         """Train rolling window regression model using monotonic spline with controlled knots"""
         try:
             from scipy.interpolate import make_smoothing_spline
@@ -189,16 +189,17 @@ class SPXCOFAnalyzer:
                 })
                 y = window_data[self.cof_term]
                 
-                # Sort data by CFTC positions to ensure monotonicity
-                sort_idx = X['cftc_positions'].argsort()
-                X_sorted = X.iloc[sort_idx]
-                y_sorted = y.iloc[sort_idx]
+                # Create pairs of (X, y) and sort by X
+                pairs = list(zip(X['cftc_positions'], y))
+                pairs.sort(key=lambda x: x[0])  # Sort by X value
+                X_sorted = pd.DataFrame({'cftc_positions': [x for x, _ in pairs]})
+                y_sorted = pd.Series([y for _, y in pairs], index=X_sorted.index)
                 
                 # Find optimal smoothing for this window
                 best_s, _, _ = self._find_optimal_smoothing(
                     X_sorted['cftc_positions'].values,
                     y_sorted.values,
-                    n_splits=min(5, window_size//10)
+                    n_splits=min(10, window_size//10)
                 )
                 
                 # Create spline with optimal smoothing
