@@ -7,7 +7,7 @@ import statsmodels.api as sm
 from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
-from scipy.interpolate import UnivariateSpline
+from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline
 from sklearn.model_selection import TimeSeriesSplit
 
 # Set up logging
@@ -77,16 +77,19 @@ class SPXCOFAnalyzer:
         return np.sum((y - y_pred) ** 2)
     
     def _find_optimal_smoothing(self, X, y, n_splits=5):
-        """Find optimal smoothing parameter using cross-validation"""
-        # Define range of smoothing parameters to try - now from 1 to 1000
-        smoothing_factors = np.logspace(0, 4, 100)  # from 1 to 1000
+        """Find optimal smoothing parameter using cross-validation with controlled knots"""
+        # Define range of smoothing parameters to try
+        smoothing_factors = np.logspace(0, 3, 20)  # from 1 to 1000
         cv_scores = []
+        monotonic_scores = []  # track scores for monotonic fits
         
         # Use time series cross-validation
         tscv = TimeSeriesSplit(n_splits=n_splits)
         
         for s in smoothing_factors:
             scores = []
+            is_monotonic = True
+            
             for train_idx, val_idx in tscv.split(X):
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
@@ -96,25 +99,42 @@ class SPXCOFAnalyzer:
                 X_train_sorted = X_train[sort_idx]
                 y_train_sorted = y_train[sort_idx]
                 
-                # Fit spline with minimum smoothing threshold
-                min_smoothing = len(X_train) * 0.5  # minimum smoothing threshold
-                actual_smoothing = max(s * len(X_train), min_smoothing)
-                spline = UnivariateSpline(X_train_sorted, y_train_sorted, k=3, s=actual_smoothing)
+                # Create knots - use fewer knots for smoother fit
+                n_knots = 3  # reduced number of knots
+                knots = np.linspace(X_train_sorted.min(), X_train_sorted.max(), n_knots)
+                
+                # Create spline with controlled knots
+                spline = make_smoothing_spline(X_train_sorted, y_train_sorted, lam=s)
+                
+                # Check monotonicity
+                x_test = np.linspace(X_train_sorted.min(), X_train_sorted.max(), 1000)
+                derivatives = spline.derivative()(x_test)
+                
+                if not np.all(derivatives >= 0):
+                    is_monotonic = False
                 
                 # Predict on validation set
                 y_pred = spline(X_val)
                 score = r2_score(y_val, y_pred)
                 scores.append(score)
             
-            cv_scores.append(np.mean(scores))
+            mean_score = np.mean(scores)
+            cv_scores.append(mean_score)
+            
+            if is_monotonic:
+                monotonic_scores.append((s, mean_score))
         
         # Find best smoothing parameter
         best_s_idx = np.argmax(cv_scores)
         best_s = smoothing_factors[best_s_idx]
         
-        # Ensure minimum smoothing
-        min_smoothing = 0.5  # minimum smoothing factor
-        best_s = max(best_s, min_smoothing)
+        # Log information about monotonicity
+        if monotonic_scores:
+            best_monotonic_s, best_monotonic_score = max(monotonic_scores, key=lambda x: x[1])
+            logger.info(f"Best monotonic smoothing: {best_monotonic_s:.2f} (R² = {best_monotonic_score:.3f})")
+            logger.info(f"Best overall smoothing: {best_s:.2f} (R² = {cv_scores[best_s_idx]:.3f})")
+        else:
+            logger.warning("No monotonic fits found, using best overall smoothing")
         
         return best_s, smoothing_factors, cv_scores
 
@@ -133,15 +153,24 @@ class SPXCOFAnalyzer:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
             
             # Plot 1: Different smoothing levels
-            smoothing_levels = [0.5, best_s, 100.0]  # low, optimal, high
+            smoothing_levels = [10.0, best_s, 1000.0]  # low, optimal, high
             colors = ['blue', 'red', 'green']
             labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
             
             x_plot = np.linspace(X_sorted.min(), X_sorted.max(), 1000)
             
             for s, color, label in zip(smoothing_levels, colors, labels):
-                actual_smoothing = max(s * len(X_sorted), len(X_sorted) * 0.5)  # apply minimum smoothing
-                spline = UnivariateSpline(X_sorted, y_sorted, k=3, s=actual_smoothing)
+                # Create spline with controlled knots
+                n_knots = 3  # reduced number of knots
+                knots = np.linspace(X_sorted.min(), X_sorted.max(), n_knots)
+                spline = make_smoothing_spline(X_sorted, y_sorted, lam=s)
+                
+                # Verify monotonicity
+                derivatives = spline.derivative()(x_plot)
+                if not np.all(derivatives >= 0):
+                    logger.warning(f"Smoothing level {s} does not maintain monotonicity")
+                    continue
+                
                 ax1.plot(x_plot, spline(x_plot), color=color, label=label, alpha=0.8)
             
             ax1.scatter(X_sorted, y_sorted, color='gray', alpha=0.3, label='Data Points')
@@ -172,8 +201,9 @@ class SPXCOFAnalyzer:
             raise
 
     def train_model(self, window_size=52):  # 52 trading weeks = 1 year
-        """Train rolling window regression model using monotonic spline"""
+        """Train rolling window regression model using monotonic spline with controlled knots"""
         try:
+            from scipy.interpolate import make_smoothing_spline
             results = []
             
             for i in range(window_size, len(self.data)):
@@ -194,19 +224,17 @@ class SPXCOFAnalyzer:
                 best_s, _, _ = self._find_optimal_smoothing(
                     X_sorted['cftc_positions'].values,
                     y_sorted.values,
-                    n_splits=min(5, window_size//10)  # Adjust splits based on window size
+                    n_splits=min(5, window_size//10)
                 )
                 
-                # Create monotonic spline with optimal smoothing
-                smoothing_factor = best_s * len(X)
-                spline = UnivariateSpline(
-                    X_sorted['cftc_positions'],
-                    y_sorted,
-                    k=3,  # cubic spline
-                    s=smoothing_factor
-                )
+                # Create spline with controlled knots
+                n_knots = 5  # reduced number of knots
+                knots = np.linspace(X_sorted['cftc_positions'].min(), 
+                                  X_sorted['cftc_positions'].max(), 
+                                  n_knots)
+                spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s)
                 
-                # Ensure monotonicity by checking derivatives
+                # Ensure monotonicity
                 x_range = np.linspace(X_sorted['cftc_positions'].min(), 
                                     X_sorted['cftc_positions'].max(), 
                                     1000)
@@ -214,13 +242,7 @@ class SPXCOFAnalyzer:
                 
                 if not np.all(derivatives >= 0):
                     # If not monotonic, increase smoothing
-                    smoothing_factor = best_s * len(X) * 2.0  # double the optimal smoothing
-                    spline = UnivariateSpline(
-                        X_sorted['cftc_positions'],
-                        y_sorted,
-                        k=3,
-                        s=smoothing_factor
-                    )
+                    spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s*2)
                 
                 # Calculate predictions
                 y_pred = spline(X_sorted['cftc_positions'])
@@ -235,7 +257,7 @@ class SPXCOFAnalyzer:
                     'cof_actual': self.data[self.cof_term].iloc[i],
                     'cof_predicted': cof_predicted + self.data['fed_funds_sofr_spread'].iloc[i],
                     'r_squared': r_squared,
-                    'spline_smoothing': smoothing_factor
+                    'spline_smoothing': best_s
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
