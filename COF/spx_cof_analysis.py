@@ -7,7 +7,7 @@ import statsmodels.api as sm
 from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
-from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline
+from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline, make_lsq_spline
 from sklearn.model_selection import TimeSeriesSplit
 
 # Set up logging
@@ -78,8 +78,10 @@ class SPXCOFAnalyzer:
     
     def _find_optimal_smoothing(self, X, y, n_splits=5):
         """Find optimal smoothing parameter using cross-validation with controlled knots"""
-        # Define range of smoothing parameters to try
-        smoothing_factors = np.logspace(0, 4, 100)  # from 1 to 1000
+        from scipy.interpolate import BSpline, make_lsq_spline
+        
+        # Define range of smoothing parameters to try - now using linear spacing
+        smoothing_factors = np.linspace(10, 20000, 500)  # 100 evenly spaced values from 1 to 1000
         cv_scores = []
         monotonic_scores = []  # track scores for monotonic fits
         
@@ -99,12 +101,20 @@ class SPXCOFAnalyzer:
                 X_train_sorted = X_train[sort_idx]
                 y_train_sorted = y_train[sort_idx]
                 
-                # Create knots - use fewer knots for smoother fit
-                n_knots = 3  # reduced number of knots
-                knots = np.linspace(X_train_sorted.min(), X_train_sorted.max(), n_knots)
+                # Create knots for quadratic-like shape
+                # Use 3 knots to enforce a more quadratic shape
+                knots = np.array([
+                    X_train_sorted.min(),  # start knot
+                    (X_train_sorted.min() + X_train_sorted.max()) / 2,  # middle knot
+                    X_train_sorted.max()   # end knot
+                ])
                 
-                # Create spline with controlled knots
-                spline = make_smoothing_spline(X_train_sorted, y_train_sorted, lam=s)
+                # Create B-spline basis
+                k = 3  # cubic spline
+                t = np.r_[(X_train_sorted[0],) * k, knots, (X_train_sorted[-1],) * k]
+                
+                # Fit spline with explicit knots
+                spline = make_lsq_spline(X_train_sorted, y_train_sorted, t, k=k)
                 
                 # Check monotonicity
                 x_test = np.linspace(X_train_sorted.min(), X_train_sorted.max(), 1000)
@@ -141,6 +151,8 @@ class SPXCOFAnalyzer:
     def visualize_smoothing_tradeoff(self):
         """Visualize the trade-off between smoothness and fit"""
         try:
+            from scipy.interpolate import BSpline, make_lsq_spline
+            
             # Sort data
             sort_idx = self.data['cftc_positions'].argsort()
             X_sorted = self.data['cftc_positions'].iloc[sort_idx].values
@@ -159,11 +171,20 @@ class SPXCOFAnalyzer:
             
             x_plot = np.linspace(X_sorted.min(), X_sorted.max(), 1000)
             
+            # Create knots for quadratic-like shape
+            knots = np.array([
+                X_sorted.min(),  # start knot
+                (X_sorted.min() + X_sorted.max()) / 2,  # middle knot
+                X_sorted.max()   # end knot
+            ])
+            
+            # Create B-spline basis
+            k = 3  # cubic spline
+            t = np.r_[(X_sorted[0],) * k, knots, (X_sorted[-1],) * k]
+            
             for s, color, label in zip(smoothing_levels, colors, labels):
-                # Create spline with controlled knots
-                n_knots = 3  # reduced number of knots
-                knots = np.linspace(X_sorted.min(), X_sorted.max(), n_knots)
-                spline = make_smoothing_spline(X_sorted, y_sorted, lam=s)
+                # Create spline with explicit knots
+                spline = make_lsq_spline(X_sorted, y_sorted, t, k=k)
                 
                 # Verify monotonicity
                 derivatives = spline.derivative()(x_plot)
