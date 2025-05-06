@@ -75,11 +75,11 @@ class SPXCOFAnalyzer:
         from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(4.7, 7, 30)  # 100 values from 50000 to 1000000 on log scale
+        smoothing_factors = np.logspace(4.7, 7, 30)  # 30 values from 50000 to 10000000 on log scale
         cv_scores = []
         
-        # Use K-fold cross-validation
-        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        # Use K-fold cross-validation without shuffling
+        kf = KFold(n_splits=n_splits)
         
         for s in smoothing_factors:
             scores = []
