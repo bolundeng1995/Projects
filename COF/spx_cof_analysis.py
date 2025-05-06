@@ -75,11 +75,11 @@ class SPXCOFAnalyzer:
         from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(4.7, 7, 30)  # 30 values from 50000 to 10000000 on log scale
+        smoothing_factors = np.logspace(5, 7, 30)  # 30 values from 100000 to 10000000 on log scale
         cv_scores = []
         
-        # Use K-fold cross-validation without shuffling
-        kf = KFold(n_splits=n_splits)
+        # Use K-fold cross-validation with shuffling to avoid time series bias
+        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
         
         for s in smoothing_factors:
             scores = []
@@ -88,7 +88,7 @@ class SPXCOFAnalyzer:
                 X_train, X_val = X[train_idx], X[val_idx]
                 y_train, y_val = y[train_idx], y[val_idx]
                 
-                # Sort training data
+                # Sort training data by X values for spline fitting
                 sort_idx = np.argsort(X_train)
                 X_train_sorted = X_train[sort_idx]
                 y_train_sorted = y_train[sort_idx]
@@ -96,9 +96,14 @@ class SPXCOFAnalyzer:
                 # Create spline with smoothing parameter
                 spline = make_smoothing_spline(X_train_sorted, y_train_sorted, lam=s)
                 
+                # Sort validation data by X values for prediction
+                val_sort_idx = np.argsort(X_val)
+                X_val_sorted = X_val[val_sort_idx]
+                y_val_sorted = y_val[val_sort_idx]
+                
                 # Predict on validation set
-                y_pred = spline(X_val)
-                score = r2_score(y_val, y_pred)
+                y_pred = spline(X_val_sorted)
+                score = r2_score(y_val_sorted, y_pred)
                 scores.append(score)
             
             mean_score = np.mean(scores)
@@ -128,7 +133,7 @@ class SPXCOFAnalyzer:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
             
             # Plot 1: Different smoothing levels
-            smoothing_levels = [1e5, best_s, 1e7]  # low, optimal, high
+            smoothing_levels = [5e4, best_s, 1e7]  # low, optimal, high
             colors = ['blue', 'red', 'green']
             labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
             
