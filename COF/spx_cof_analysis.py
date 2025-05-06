@@ -6,6 +6,8 @@ from statsmodels.regression.linear_model import OLS
 import statsmodels.api as sm
 from sklearn.metrics import r2_score
 import logging
+from scipy.optimize import minimize
+from scipy.interpolate import UnivariateSpline
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -36,6 +38,8 @@ class SPXCOFAnalyzer:
         try:
             # Read data from Excel
             self.data = pd.read_excel(file_path, sheet_name="Data", index_col=0)
+
+            self.data = self.data.ffill()
             
             # Multiply fed_funds_sofr_spread by -1, and thus positive values will be associated with higher liquidity stress
             self.data['fed_funds_sofr_spread'] = self.data['fed_funds_sofr_spread'] * -1
@@ -59,46 +63,79 @@ class SPXCOFAnalyzer:
             logger.error(f"Error loading data from Excel: {str(e)}")
             raise
     
+    def _quadratic_objective(self, params, X, y):
+        """Objective function for quadratic regression with constraints"""
+        y_pred = X @ params  # Matrix multiplication for prediction
+        return np.sum((y - y_pred) ** 2)
+    
+    def _spline_objective(self, params, X, y, knots):
+        """Objective function for spline regression"""
+        # Create spline basis functions
+        spline = UnivariateSpline(X['cftc_positions'], y, k=3, s=params[0])
+        y_pred = spline(X['cftc_positions'])
+        return np.sum((y - y_pred) ** 2)
+    
     def train_model(self, window_size=52):  # 52 trading weeks = 1 year
-        """Train rolling window regression model using quadratic form"""
+        """Train rolling window regression model using monotonic spline"""
         try:
             results = []
             
             for i in range(window_size, len(self.data)):
                 window_data = self.data.iloc[i-window_size:i+1]
                 
-                # Create quadratic terms for CFTC positions
+                # Prepare data
                 X = pd.DataFrame({
-                    'cftc_positions': window_data['cftc_positions'],
-                    'cftc_positions_squared': window_data['cftc_positions'] ** 2
+                    'cftc_positions': window_data['cftc_positions']
                 })
-                X = sm.add_constant(X)  # Add constant term
                 y = window_data[self.cof_term]
                 
-                model = OLS(y, X).fit()
+                # Sort data by CFTC positions to ensure monotonicity
+                sort_idx = X['cftc_positions'].argsort()
+                X_sorted = X.iloc[sort_idx]
+                y_sorted = y.iloc[sort_idx]
+                
+                # Create monotonic spline
+                spline = UnivariateSpline(
+                    X_sorted['cftc_positions'],
+                    y_sorted,
+                    k=3,  # cubic spline
+                    s=len(X) * 0.1  # smoothing parameter
+                )
+                
+                # Ensure monotonicity by checking derivatives
+                x_range = np.linspace(X_sorted['cftc_positions'].min(), 
+                                    X_sorted['cftc_positions'].max(), 
+                                    1000)
+                derivatives = spline.derivative()(x_range)
+                
+                if not np.all(derivatives >= 0):
+                    # If not monotonic, increase smoothing
+                    spline = UnivariateSpline(
+                        X_sorted['cftc_positions'],
+                        y_sorted,
+                        k=3,
+                        s=len(X) * 0.5  # increased smoothing
+                    )
+                
+                # Calculate predictions
+                y_pred = spline(X_sorted['cftc_positions'])
+                r_squared = r2_score(y_sorted, y_pred)
                 
                 # Predict using the last row of data
-                last_X = pd.DataFrame({
-                    'const': [1],  # Add constant term explicitly
-                    'cftc_positions': [window_data['cftc_positions'].iloc[-1]],
-                    'cftc_positions_squared': [window_data['cftc_positions'].iloc[-1] ** 2]
-                })
-                # Ensure columns are in the same order as the training data
-                last_X = last_X[X.columns]
+                last_x = window_data['cftc_positions'].iloc[-1]
+                cof_predicted = spline(last_x)
                 
                 results.append({
                     'date': self.data.index[i],
                     'cof_actual': self.data[self.cof_term].iloc[i],
-                    'cof_predicted': model.predict(last_X)[0] + self.data['fed_funds_sofr_spread'].iloc[i],
-                    'r_squared': model.rsquared,
-                    'quadratic_coef': model.params['cftc_positions_squared'],
-                    'linear_coef': model.params['cftc_positions'],
-                    'intercept': model.params['const']
+                    'cof_predicted': cof_predicted + self.data['fed_funds_sofr_spread'].iloc[i],
+                    'r_squared': r_squared,
+                    'spline_smoothing': spline.get_smoothing_factor()
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
             self.model_results.to_excel('Model_Results.xlsx')
-            logger.info("Quadratic model training completed successfully")
+            logger.info("Monotonic spline model training completed successfully")
             
         except Exception as e:
             logger.error(f"Error training model: {str(e)}")
@@ -164,27 +201,26 @@ class SPXCOFAnalyzer:
             plt.legend()
             plt.grid(True)
             
-            # Plot actual COF vs CFTC positions with quadratic fit
+            # Plot actual COF vs CFTC positions with spline fit
             plt.subplot(3, 1, 3)
             plt.scatter(self.data['cftc_positions'], self.data[self.cof_term], 
                        alpha=0.5, color='blue', label=f'{self.cof_term} vs CFTC Positions')
             
-            # Add quadratic regression line
-            z = np.polyfit(self.data['cftc_positions'], self.data[self.cof_term], 2)
-            p = np.poly1d(z)
+            # Add spline regression line
+            spline = UnivariateSpline(self.data['cftc_positions'], self.data[self.cof_term], k=3, s=self.model_results['spline_smoothing'].iloc[-1])
             x_sorted = np.sort(self.data['cftc_positions'])
-            plt.plot(x_sorted, p(x_sorted), 
+            plt.plot(x_sorted, spline(x_sorted), 
                     "r--", alpha=0.8, 
-                    label=f'Quadratic Fit (y={z[0]:.2f}x²+{z[1]:.2f}x+{z[2]:.2f})')
+                    label=f'Spline Fit (smoothing={self.model_results["spline_smoothing"].iloc[-1]:.2f})')
             
             plt.xlabel('CFTC Positions')
             plt.ylabel(f'Actual {self.cof_term}')
-            plt.title(f'{self.cof_term} vs CFTC Positions Scatter Plot with Quadratic Fit')
+            plt.title(f'{self.cof_term} vs CFTC Positions Scatter Plot with Spline Fit')
             plt.legend()
             plt.grid(True)
             
             # Add R-squared value
-            y_pred = p(self.data['cftc_positions'])
+            y_pred = spline(self.data['cftc_positions'])
             r2 = r2_score(self.data[self.cof_term], y_pred)
             plt.text(0.05, 0.95, f'R² = {r2:.2f}', 
                     transform=plt.gca().transAxes, 
