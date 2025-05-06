@@ -75,7 +75,7 @@ class SPXCOFAnalyzer:
         from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(5, 7, 30)  # 30 values from 100000 to 10000000 on log scale
+        smoothing_factors = np.logspace(4, 7, 30)  # 30 values from 100000 to 10000000 on log scale
         cv_scores = []
         
         # Use K-fold cross-validation with shuffling to avoid time series bias
@@ -133,7 +133,7 @@ class SPXCOFAnalyzer:
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
             
             # Plot 1: Different smoothing levels
-            smoothing_levels = [5e4, best_s, 1e7]  # low, optimal, high
+            smoothing_levels = [5e3, best_s, 1e7]  # low, optimal, high
             colors = ['blue', 'red', 'green']
             labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
             
