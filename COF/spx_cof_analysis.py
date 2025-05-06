@@ -95,11 +95,12 @@ class SPXCOFAnalyzer:
                 y_sorted = y.iloc[sort_idx]
                 
                 # Create monotonic spline
+                smoothing_factor = len(X) * 0.1  # initial smoothing parameter
                 spline = UnivariateSpline(
                     X_sorted['cftc_positions'],
                     y_sorted,
                     k=3,  # cubic spline
-                    s=len(X) * 0.1  # smoothing parameter
+                    s=smoothing_factor
                 )
                 
                 # Ensure monotonicity by checking derivatives
@@ -110,11 +111,12 @@ class SPXCOFAnalyzer:
                 
                 if not np.all(derivatives >= 0):
                     # If not monotonic, increase smoothing
+                    smoothing_factor = len(X) * 0.5  # increased smoothing
                     spline = UnivariateSpline(
                         X_sorted['cftc_positions'],
                         y_sorted,
                         k=3,
-                        s=len(X) * 0.5  # increased smoothing
+                        s=smoothing_factor
                     )
                 
                 # Calculate predictions
@@ -130,7 +132,7 @@ class SPXCOFAnalyzer:
                     'cof_actual': self.data[self.cof_term].iloc[i],
                     'cof_predicted': cof_predicted + self.data['fed_funds_sofr_spread'].iloc[i],
                     'r_squared': r_squared,
-                    'spline_smoothing': spline.get_smoothing_factor()
+                    'spline_smoothing': smoothing_factor
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
