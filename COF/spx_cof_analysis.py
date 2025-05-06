@@ -69,7 +69,7 @@ class SPXCOFAnalyzer:
         y_pred = X @ params  # Matrix multiplication for prediction
         return np.sum((y - y_pred) ** 2)
     
-    def _find_optimal_smoothing(self, X, y, n_splits=5):
+    def _find_optimal_smoothing(self, X, y, n_splits=3):
         """Find optimal smoothing parameter using cross-validation"""
         from scipy.interpolate import make_smoothing_spline
         from sklearn.model_selection import KFold
