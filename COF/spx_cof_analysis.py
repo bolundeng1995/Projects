@@ -69,17 +69,17 @@ class SPXCOFAnalyzer:
         y_pred = X @ params  # Matrix multiplication for prediction
         return np.sum((y - y_pred) ** 2)
     
-    def _find_optimal_smoothing(self, X, y, n_splits=3):
+    def _find_optimal_smoothing(self, X, y, n_splits=5):
         """Find optimal smoothing parameter using cross-validation"""
         from scipy.interpolate import make_smoothing_spline
         from sklearn.model_selection import KFold
         
         # Define range of smoothing parameters to try - using log spacing
-        smoothing_factors = np.logspace(4, 7, 30)  # 30 values from 100000 to 10000000 on log scale
+        smoothing_factors = np.logspace(4, 7, 30)  # 30 values from 10000 to 10000000 on log scale
         cv_scores = []
         
-        # Use K-fold cross-validation with shuffling to avoid time series bias
-        kf = KFold(n_splits=n_splits, shuffle=True, random_state=42)
+        # Use K-fold cross-validation without shuffling for time series
+        kf = KFold(n_splits=n_splits, shuffle=False)
         
         for s in smoothing_factors:
             scores = []
