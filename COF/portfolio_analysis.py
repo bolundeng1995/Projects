@@ -193,6 +193,10 @@ class COFPortfolioAnalyzer:
             analyzer = self.analyzers[cof_term]
             strategy = self.strategies[cof_term]
             
+            # Ensure liquidity analysis is performed to calculate deviations
+            if 'cof_deviation' not in analyzer.model_results.columns:
+                analyzer.analyze_liquidity()
+            
             # Get current data
             current_data = analyzer.data.iloc[-1].copy()
             current_cftc = current_data['cftc_positions']
