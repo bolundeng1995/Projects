@@ -199,9 +199,11 @@ class COFPortfolioAnalyzer:
             current_cof = current_data[cof_term]
             current_liquidity = current_data['fed_funds_sofr_spread']
             
-            # Create spline prediction
-            spline = analyzer.model_results['spline'].iloc[-1]
-            predicted_cof = spline(new_cftc_positions) + current_liquidity
+            # Get the spline model from the analyzer
+            spline_model = analyzer.spline_model
+            
+            # Create prediction using the spline model
+            predicted_cof = spline_model(new_cftc_positions) + current_liquidity
             
             # Calculate deviation
             deviation = predicted_cof - current_cof

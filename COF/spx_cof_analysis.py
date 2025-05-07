@@ -205,6 +205,10 @@ class SPXCOFAnalyzer:
                 # Create spline with optimal smoothing
                 spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s)
                 
+                # Store the spline model for the latest window
+                if i == len(self.data) - 1:
+                    self.spline_model = spline
+                
                 # Calculate predictions
                 y_pred = spline(X_sorted['cftc_positions'])
                 r_squared = r2_score(y_sorted, y_pred)
