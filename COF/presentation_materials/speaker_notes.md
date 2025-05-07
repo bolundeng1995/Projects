@@ -268,7 +268,7 @@ strategy = COFTradingStrategy(
    - Present historical examples
 
 **Closing:**
-"Thank you for your time. I look forward to working with you on implementing this strategy."
+"Thank you for your time. I look forward to working with you on implementing this strategy." 
 
 ## Technical Setup Notes
 - Test all animations before presentation

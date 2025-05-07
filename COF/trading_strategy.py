@@ -183,7 +183,7 @@ class COFTradingStrategy:
         self.trade_tracker = TradeTracker(initial_capital)
         self.position = Position()
         self.cof_term = cof_term  # The value to predict or train
-
+        
     def calculate_liquidity_stress(self) -> None:
         """Calculate a composite liquidity stress indicator.
         
@@ -208,7 +208,7 @@ class COFTradingStrategy:
         except Exception as e:
             logger.error(f"Error calculating liquidity stress: {str(e)}")
             raise
-
+    
     def generate_signals(self, entry_threshold: float = 2.0, exit_threshold: float = 0.5, 
                         liquidity_threshold: Optional[float] = None) -> None:
         """Generate trading signals based on COF mispricing and liquidity indicators.
@@ -240,8 +240,8 @@ class COFTradingStrategy:
         """
         self.cof_data[f'{self.cof_term}_deviation'] = (
             self.cof_data[f'{self.cof_term}_actual'] - self.cof_data[f'{self.cof_term}_predicted']
-        )
-        
+            )
+            
         window_size = 52
         rolling_mean = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).mean()
         rolling_std = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).std()
@@ -261,8 +261,8 @@ class COFTradingStrategy:
             exit_threshold (float): Z-score threshold for exiting positions
             liquidity_threshold (Optional[float]): Threshold for liquidity stress
         """
-        self.cof_data['signal'] = 0
-        
+            self.cof_data['signal'] = 0
+            
         # Define deviation thresholds (can be adjusted)
         deviation_entry_threshold = 5  # Example value, adjust based on your needs
         deviation_exit_threshold = 0    # Example value, adjust based on your needs
@@ -287,10 +287,10 @@ class COFTradingStrategy:
                  (self.cof_data[f'{self.cof_term}_deviation'] > deviation_entry_threshold)) &
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
-        
-        self.cof_data.loc[long_condition, 'signal'] = 1
-        self.cof_data.loc[short_condition, 'signal'] = -1
-        
+            
+            self.cof_data.loc[long_condition, 'signal'] = 1
+            self.cof_data.loc[short_condition, 'signal'] = -1
+            
         # Apply exit conditions
         long_exit = (
             ((self.cof_data[f'{self.cof_term}_deviation_zscore'] > -exit_threshold) |
@@ -316,7 +316,7 @@ class COFTradingStrategy:
                 if (self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[i] > exit_threshold and 
                     self.cof_data[f'{self.cof_term}_deviation'].iloc[i] > deviation_exit_threshold):
                     self.cof_data['signal'].iloc[i] = -1  # maintain short position
-
+    
     def backtest(self, transaction_cost: float = 0.0, max_loss: float = 20,
                 double_threshold: float = 2.5, max_position_size: int = 2) -> None:
         """Backtest the trading strategy.
@@ -343,7 +343,7 @@ class COFTradingStrategy:
         except Exception as e:
             logger.error(f"Error in backtesting: {str(e)}")
             raise
-
+    
     def _process_trading_day(self, idx: int, transaction_cost: float, max_loss: float,
                            double_threshold: float, max_position_size: int, 
                            prev_price: Optional[float]) -> None:
@@ -393,7 +393,7 @@ class COFTradingStrategy:
         if prev_price is not None:
             daily_pnl = self.position.size * (price - prev_price)
             self.trade_tracker.update_daily_pnl(idx, self.position, price, prev_price)
-        
+            
         # Check stop loss using absolute terms
         cumulative_unrealized_pnl = self.position.size * (price - self.position.avg_entry_price)
         if cumulative_unrealized_pnl <= -max_loss:
@@ -507,7 +507,7 @@ class COFTradingStrategy:
         except Exception as e:
             logger.error(f"Error calculating performance metrics: {str(e)}")
             raise
-
+    
     def plot_results(self) -> None:
         """Plot backtesting results.
         
