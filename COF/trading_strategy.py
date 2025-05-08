@@ -287,8 +287,8 @@ class COFTradingStrategy:
                 (self.liquidity_data['liquidity_stress'] < liquidity_threshold)
             )
             
-            self.cof_data.loc[long_condition, 'signal'] = 1
-            self.cof_data.loc[short_condition, 'signal'] = -1
+        self.cof_data.loc[long_condition, 'signal'] = 1
+        self.cof_data.loc[short_condition, 'signal'] = -1
             
         # Apply exit conditions
         long_exit = (
@@ -406,7 +406,7 @@ class COFTradingStrategy:
                (self.position.size < 0 and current_zscore > double_threshold):
                 self.position.double_down(price)
                 enter_reason = f'doubled_down_zscore_{current_zscore:.2f}'
-                self.trade_tracker.record_position_update(idx, self.position, price, enter_reason)
+                self.trade_tracker.record_position_update(idx, self.position, price, transaction_cost, enter_reason)
                 logger.info(f"Doubled down position at {self.cof_data.index[idx]} with z-score {current_zscore:.2f}")
 
     def _enter_new_position(self, idx: int, signal: int, price: float, 
@@ -432,7 +432,7 @@ class COFTradingStrategy:
         else:
             enter_reason = f'short_signal_zscore_{current_zscore:.2f}'
             
-        self.trade_tracker.record_position_update(idx, self.position, price, enter_reason)
+        self.trade_tracker.record_position_update(idx, self.position, price, transaction_cost, enter_reason)
 
     def _exit_position(self, idx: int, price: float) -> None:
         """Exit an existing trading position.
