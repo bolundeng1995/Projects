@@ -68,22 +68,19 @@ class TradeTracker:
         cumulative_pnl (float): Total realized PnL across all trades
         positions (pd.DataFrame): DataFrame containing detailed trade records
         metrics (Dict): Dictionary containing performance metrics
-        transaction_cost (float): Transaction cost as a fraction of trade value
     """
 
-    def __init__(self, initial_capital: float, transaction_cost: float = 0.0):
+    def __init__(self, initial_capital: float):
         """Initialize the TradeTracker with initial capital.
         
         Args:
             initial_capital (float): Starting capital for the strategy
-            transaction_cost (float): Transaction cost as a fraction of trade value
         """
         self.initial_capital = initial_capital
         self.base_capital = initial_capital
         self.cumulative_pnl = 0.0
         self.positions = None
         self.metrics = {}
-        self.transaction_cost = transaction_cost
 
     def initialize_tracking(self, index: pd.Index) -> None:
         """Initialize the positions DataFrame with the required columns.
@@ -119,8 +116,29 @@ class TradeTracker:
             self.positions.iloc[idx, self.positions.columns.get_loc('unrealized_pnl')] = daily_pnl
             self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
 
+    def record_trade_exit(self, idx: int, position: Position, price: float, exit_reason: str) -> None:
+        """Record the details of a trade exit.
+        
+        Args:
+            idx (int): Index of the current trading day
+            position (Position): Position being exited
+            price (float): Exit price
+            exit_reason (str): Reason for exit (e.g., 'signal', 'stop_loss')
+        """
+        cost = abs(position.size) * price * self.transaction_cost
+        self.base_capital -= cost
+        pnl = position.size * (price - position.avg_entry_price)
+        self.cumulative_pnl += pnl
+        self.positions.iloc[idx, self.positions.columns.get_loc('exit_price')] = price
+        self.positions.iloc[idx, self.positions.columns.get_loc('pnl')] = pnl
+        self.positions.iloc[idx, self.positions.columns.get_loc('cumulative_pnl')] = self.cumulative_pnl
+        self.positions.iloc[idx, self.positions.columns.get_loc('exit_reason')] = exit_reason
+        self.positions.iloc[idx, self.positions.columns.get_loc('trade_duration')] = (
+            self.positions.index[idx] - position.entry_date
+        ).days
+
     def record_position_update(self, idx: int, position: Position, price: float, 
-                             enter_reason: str = '') -> None:
+                              enter_reason: str = '') -> None:
         """Record position update details including transaction costs.
         
         Args:
@@ -132,37 +150,7 @@ class TradeTracker:
         self.positions.iloc[idx, self.positions.columns.get_loc('position')] = position.size
         self.positions.iloc[idx, self.positions.columns.get_loc('entry_price')] = price
         self.positions.iloc[idx, self.positions.columns.get_loc('enter_reason')] = enter_reason
-        
-        # Only apply transaction cost when entering a new position
-        if position.entry_date == self.positions.index[idx]:
-            cost = abs(position.size) * price * self.transaction_cost
-            self.base_capital -= cost
-            
-        self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
 
-    def record_trade_exit(self, idx: int, position: Position, price: float, 
-                         exit_reason: str) -> None:
-        """Record the details of a trade exit.
-        
-        Args:
-            idx (int): Index of the current trading day
-            position (Position): Position being exited
-            price (float): Exit price
-            exit_reason (str): Reason for exit (e.g., 'signal', 'stop_loss')
-        """
-        # Apply transaction cost when exiting position
-        cost = abs(position.size) * price * self.transaction_cost
-        self.base_capital -= cost
-        
-        pnl = position.size * (price - position.avg_entry_price)
-        self.cumulative_pnl += pnl
-        self.positions.iloc[idx, self.positions.columns.get_loc('exit_price')] = price
-        self.positions.iloc[idx, self.positions.columns.get_loc('pnl')] = pnl
-        self.positions.iloc[idx, self.positions.columns.get_loc('cumulative_pnl')] = self.cumulative_pnl
-        self.positions.iloc[idx, self.positions.columns.get_loc('exit_reason')] = exit_reason
-        self.positions.iloc[idx, self.positions.columns.get_loc('trade_duration')] = (
-            self.positions.index[idx] - position.entry_date
-        ).days
         self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
 
 class COFTradingStrategy:
@@ -178,28 +166,46 @@ class COFTradingStrategy:
         initial_capital (float): Starting capital for the strategy
         trade_tracker (TradeTracker): Object to track trading performance
         position (Position): Object to manage current position
-        transaction_cost (float): Transaction cost as a fraction of trade value
     """
 
     def __init__(self, cof_data: pd.DataFrame, liquidity_data: pd.DataFrame, 
-                 initial_capital: float = 0, cof_term: str = "cof",
-                 transaction_cost: float = 0.0):
+                 initial_capital: float = 0, 
+                 transaction_cost: float = 0.0,
+                 max_loss: float = 20,
+                 double_threshold: float = 2.5,
+                 max_position_size: int = 2,
+                 entry_threshold: float = 2.0,
+                 exit_threshold: float = 0.5,
+                 liquidity_threshold: Optional[float] = None,
+                 cof_term: str = "cof"):
         """Initialize the COF trading strategy.
         
         Args:
             cof_data (pd.DataFrame): DataFrame containing COF analysis results
             liquidity_data (pd.DataFrame): DataFrame containing liquidity indicators
             initial_capital (float): Starting capital for backtesting
-            cof_term (str): The COF term to analyze (e.g., "1Y COF", "3M COF", etc.)
             transaction_cost (float): Transaction cost as a fraction of trade value
+            max_loss (float): Maximum loss in absolute price terms
+            double_threshold (float): Z-score threshold for doubling down
+            max_position_size (int): Maximum allowed position size
+            entry_threshold (float): Z-score threshold for entering positions
+            exit_threshold (float): Z-score threshold for exiting positions
+            liquidity_threshold (Optional[float]): Threshold for liquidity stress
+            cof_term (str): The COF term to analyze (e.g., "1Y COF", "3M COF", etc.)
         """
         self.cof_data = cof_data
         self.liquidity_data = liquidity_data
         self.initial_capital = initial_capital
-        self.trade_tracker = TradeTracker(initial_capital, transaction_cost)
+        self.transaction_cost = transaction_cost
+        self.max_loss = max_loss
+        self.double_threshold = double_threshold
+        self.max_position_size = max_position_size
+        self.entry_threshold = entry_threshold
+        self.exit_threshold = exit_threshold
+        self.liquidity_threshold = liquidity_threshold
+        self.cof_term = cof_term
+        self.trade_tracker = TradeTracker(initial_capital)
         self.position = Position()
-        self.cof_term = cof_term  # The value to predict or train
-        self.transaction_cost = transaction_cost  # Store transaction cost as instance variable
         
     def calculate_liquidity_stress(self) -> None:
         """Calculate a composite liquidity stress indicator.
@@ -226,18 +232,23 @@ class COFTradingStrategy:
             logger.error(f"Error calculating liquidity stress: {str(e)}")
             raise
     
-    def generate_signals(self, entry_threshold: float = 2.0, exit_threshold: float = 0.5, 
-                        liquidity_threshold: Optional[float] = None) -> None:
+    def generate_signals(self, entry_threshold: Optional[float] = None, 
+                        exit_threshold: Optional[float] = None) -> None:
         """Generate trading signals based on COF mispricing and liquidity indicators.
         
         Args:
-            entry_threshold (float): Z-score threshold for entering positions
-            exit_threshold (float): Z-score threshold for exiting positions
-            liquidity_threshold (Optional[float]): Threshold for liquidity stress
+            entry_threshold (Optional[float]): Z-score threshold for entering positions.
+                                             If None, uses the instance variable.
+            exit_threshold (Optional[float]): Z-score threshold for exiting positions.
+                                            If None, uses the instance variable.
         """
         try:
+            # Use provided thresholds or fall back to instance variables
+            entry_threshold = entry_threshold if entry_threshold is not None else self.entry_threshold
+            exit_threshold = exit_threshold if exit_threshold is not None else self.exit_threshold
+            
             self._calculate_cof_deviation()
-            self._apply_signal_logic(entry_threshold, exit_threshold, liquidity_threshold)
+            self._apply_signal_logic(entry_threshold, exit_threshold, self.liquidity_threshold)
             
             # Store thresholds in metrics
             self.trade_tracker.metrics['entry_threshold'] = entry_threshold
@@ -334,22 +345,14 @@ class COFTradingStrategy:
                     self.cof_data[f'{self.cof_term}_deviation'].iloc[i] > deviation_exit_threshold):
                     self.cof_data['signal'].iloc[i] = -1  # maintain short position
     
-    def backtest(self, max_loss: float = 20,
-                double_threshold: float = 2.5, max_position_size: int = 2) -> None:
-        """Backtest the trading strategy.
-        
-        Args:
-            max_loss (float): Maximum loss in absolute price terms
-            double_threshold (float): Z-score threshold for doubling down
-            max_position_size (int): Maximum allowed position size
-        """
+    def backtest(self) -> None:
+        """Backtest the trading strategy."""
         try:
             self.trade_tracker.initialize_tracking(self.cof_data.index)
             prev_price = None
             
             for i in range(1, len(self.cof_data)):
-                self._process_trading_day(i, self.transaction_cost, max_loss, 
-                                       double_threshold, max_position_size, prev_price)
+                self._process_trading_day(i, prev_price)
                 prev_price = self.cof_data[f'{self.cof_term}_actual'].iloc[i]
             
             self._save_results()
@@ -360,17 +363,11 @@ class COFTradingStrategy:
             logger.error(f"Error in backtesting: {str(e)}")
             raise
     
-    def _process_trading_day(self, idx: int, transaction_cost: float, max_loss: float,
-                           double_threshold: float, max_position_size: int, 
-                           prev_price: Optional[float]) -> None:
+    def _process_trading_day(self, idx: int, prev_price: Optional[float]) -> None:
         """Process a single trading day.
         
         Args:
             idx (int): Index of the current trading day
-            transaction_cost (float): Transaction cost as a fraction of trade value
-            max_loss (float): Maximum loss in absolute price terms
-            double_threshold (float): Z-score threshold for doubling down
-            max_position_size (int): Maximum allowed position size
             prev_price (Optional[float]): Previous day's price
         """
         signal = self.cof_data['signal'].iloc[idx]
@@ -379,19 +376,16 @@ class COFTradingStrategy:
         current_zscore = self.cof_data[f'{self.cof_term}_deviation_zscore'].iloc[idx]
         
         if self.position.size != 0:
-            self._handle_existing_position(idx, price, prev_price, max_loss, 
-                                        double_threshold, max_position_size, 
-                                        current_zscore)
+            self._handle_existing_position(idx, price, prev_price, current_zscore)
             
         if signal == 0 and self.position.size == 0:
             self.trade_tracker.positions.iloc[idx, self.trade_tracker.positions.columns.get_loc('capital')] = self.trade_tracker.base_capital
         if signal != 0 and self.position.size == 0:
-            self._enter_new_position(idx, signal, price, current_date, transaction_cost)
+            self._enter_new_position(idx, signal, price, current_date)
         elif signal == 0 and self.position.size != 0:
             self._exit_position(idx, price)
 
     def _handle_existing_position(self, idx: int, price: float, prev_price: Optional[float],
-                                max_loss: float, double_threshold: float, max_position_size: int,
                                 current_zscore: float) -> None:
         """Handle logic for existing positions.
         
@@ -399,9 +393,6 @@ class COFTradingStrategy:
             idx (int): Index of the current trading day
             price (float): Current price
             prev_price (Optional[float]): Previous day's price
-            max_loss (float): Maximum loss in absolute price terms
-            double_threshold (float): Z-score threshold for doubling down
-            max_position_size (int): Maximum allowed position size
             current_zscore (float): Current COF deviation z-score
         """
         # Update daily PnL including transaction costs
@@ -411,22 +402,22 @@ class COFTradingStrategy:
             
         # Check stop loss using absolute terms
         cumulative_unrealized_pnl = self.position.size * (price - self.position.avg_entry_price)
-        if cumulative_unrealized_pnl <= -max_loss:
+        if cumulative_unrealized_pnl <= -self.max_loss:
             self.trade_tracker.record_trade_exit(idx, self.position, price, 'stop_loss')
             self.position.reset()
             return
         
         # Check doubling down
-        if self.position.position_size < max_position_size:
-            if (self.position.size > 0 and current_zscore < -double_threshold) or \
-               (self.position.size < 0 and current_zscore > double_threshold):
+        if self.position.position_size < self.max_position_size:
+            if (self.position.size > 0 and current_zscore < -self.double_threshold) or \
+               (self.position.size < 0 and current_zscore > self.double_threshold):
                 self.position.double_down(price)
                 enter_reason = f'doubled_down_zscore_{current_zscore:.2f}'
                 self.trade_tracker.record_position_update(idx, self.position, price, enter_reason)
                 logger.info(f"Doubled down position at {self.cof_data.index[idx]} with z-score {current_zscore:.2f}")
 
     def _enter_new_position(self, idx: int, signal: int, price: float, 
-                          current_date: pd.Timestamp, transaction_cost: float) -> None:
+                          current_date: pd.Timestamp) -> None:
         """Enter a new trading position.
         
         Args:
@@ -434,7 +425,6 @@ class COFTradingStrategy:
             signal (int): Trading signal (1 for long, -1 for short)
             price (float): Current price
             current_date (pd.Timestamp): Current trading date
-            transaction_cost (float): Transaction cost as a fraction of trade value
         """
         self.position.size = signal
         self.position.entry_price = price
@@ -448,7 +438,7 @@ class COFTradingStrategy:
         else:
             enter_reason = f'short_signal_zscore_{current_zscore:.2f}'
             
-        self.trade_tracker.record_position_update(idx, self.position, price, transaction_cost, enter_reason)
+        self.trade_tracker.record_position_update(idx, self.position, price, enter_reason)
 
     def _exit_position(self, idx: int, price: float) -> None:
         """Exit an existing trading position.
@@ -633,7 +623,7 @@ class COFTradingStrategy:
             self.cof_data = cof_data.copy()
         if liquidity_data is not None:
             self.liquidity_data = liquidity_data.copy()
-        self.trade_tracker = TradeTracker(self.initial_capital, self.transaction_cost)
+        self.trade_tracker = TradeTracker(self.initial_capital)
         self.position = Position()
         self.calculate_liquidity_stress()
 
@@ -678,10 +668,7 @@ class COFTradingStrategy:
                 self.reset_strategy(original_cof_data, original_liquidity_data)
                 
                 # Generate signals with current parameters
-                self.generate_signals(
-                    entry_threshold=params['entry_threshold'],
-                    exit_threshold=params['exit_threshold']
-                )
+                self.generate_signals(params['entry_threshold'], params['exit_threshold'])
                 
                 # Run backtest
                 self.backtest()
@@ -781,9 +768,7 @@ def main():
     data = pd.read_excel('COF_DATA.xlsx', index_col=0)
     
     # Initialize strategy first to get cof_term
-    strategy = COFTradingStrategy(pd.DataFrame(), pd.DataFrame(), 
-                                cof_term="1Y COF",
-                                transaction_cost=0.001)  # Set transaction cost to 0.1%
+    strategy = COFTradingStrategy(pd.DataFrame(), pd.DataFrame(), cof_term="1Y COF")
     
     # Prepare data for strategy
     cof_data = pd.DataFrame({
@@ -815,10 +800,7 @@ def main():
     
     # Reset strategy state and run with best parameters
     strategy.reset_strategy(cof_data, liquidity_data)
-    strategy.generate_signals(
-        entry_threshold=best_params['entry_threshold'],
-        exit_threshold=best_params['exit_threshold']
-    )
+    strategy.generate_signals(best_params['entry_threshold'], best_params['exit_threshold'])
     strategy.backtest()
     strategy.calculate_performance_metrics()
     strategy.plot_results()
