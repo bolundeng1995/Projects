@@ -125,8 +125,6 @@ class TradeTracker:
             price (float): Exit price
             exit_reason (str): Reason for exit (e.g., 'signal', 'stop_loss')
         """
-        cost = abs(position.size) * price * self.transaction_cost
-        self.base_capital -= cost
         pnl = position.size * (price - position.avg_entry_price)
         self.cumulative_pnl += pnl
         self.positions.iloc[idx, self.positions.columns.get_loc('exit_price')] = price
