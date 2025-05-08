@@ -136,7 +136,7 @@ class TradeTracker:
         ).days
 
     def record_position_update(self, idx: int, position: Position, price: float, 
-                              enter_reason: str = '') -> None:
+                              transaction_cost: float, enter_reason: str = '') -> None:
         """Record position update details including transaction costs.
         
         Args:
@@ -148,7 +148,8 @@ class TradeTracker:
         self.positions.iloc[idx, self.positions.columns.get_loc('position')] = position.size
         self.positions.iloc[idx, self.positions.columns.get_loc('entry_price')] = price
         self.positions.iloc[idx, self.positions.columns.get_loc('enter_reason')] = enter_reason
-
+        cost = abs(position.size) * price * transaction_cost
+        self.base_capital -= cost
         self.positions.iloc[idx, self.positions.columns.get_loc('capital')] = self.base_capital
 
 class COFTradingStrategy:
@@ -166,7 +167,7 @@ class COFTradingStrategy:
         position (Position): Object to manage current position
     """
 
-    def __init__(self, cof_data: pd.DataFrame, liquidity_data: pd.DataFrame, initial_capital: float = 0, transaction_cost: float = 0.0, cof_term: str = "cof"):
+    def __init__(self, cof_data: pd.DataFrame, liquidity_data: pd.DataFrame, initial_capital: float = 0, cof_term: str = "cof"):
         """Initialize the COF trading strategy.
         
         Args:
@@ -178,7 +179,6 @@ class COFTradingStrategy:
         self.cof_data = cof_data
         self.liquidity_data = liquidity_data
         self.initial_capital = initial_capital
-        self.transaction_cost = transaction_cost
         self.trade_tracker = TradeTracker(initial_capital)
         self.position = Position()
         self.cof_term = cof_term  # The value to predict or train
