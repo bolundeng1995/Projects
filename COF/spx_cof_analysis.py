@@ -9,6 +9,7 @@ import logging
 from scipy.optimize import minimize
 from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline, make_lsq_spline
 from sklearn.model_selection import ShuffleSplit
+from typing import Dict
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -394,6 +395,88 @@ class SPXCOFAnalyzer:
             
         except Exception as e:
             logger.error(f"Error plotting results: {str(e)}")
+            raise
+
+    def adjust_cftc_for_current_price(self, current_spx_price: float) -> float:
+        """Adjust CFTC positions to current date based on SPX price change.
+        
+        Args:
+            current_spx_price (float): Current SPX index price
+            
+        Returns:
+            float: Adjusted CFTC positions value
+        """
+        try:
+            # Get the latest data point
+            latest_data = self.data.iloc[-1].copy()
+            latest_cftc = latest_data['cftc_positions']
+            latest_spx = latest_data['spx_price']  # Make sure 'spx_price' column exists
+            
+            # Calculate price change ratio
+            price_change_ratio = current_spx_price / latest_spx
+            
+            # Adjust CFTC positions proportionally
+            adjusted_cftc = latest_cftc * price_change_ratio
+            
+            logger.info(f"CFTC positions adjusted from {latest_cftc:.2f} to {adjusted_cftc:.2f} "
+                       f"based on SPX price change from {latest_spx:.2f} to {current_spx_price:.2f}")
+            
+            return adjusted_cftc
+            
+        except Exception as e:
+            logger.error(f"Error adjusting CFTC positions: {str(e)}")
+            raise
+
+    def predict_fair_value_with_current_price(self, current_spx_price: float) -> Dict[str, float]:
+        """Predict fair value COF using current SPX price to adjust CFTC positions.
+        
+        Args:
+            current_spx_price (float): Current SPX index price
+            
+        Returns:
+            Dict[str, float]: Dictionary containing:
+                - predicted_cof: Predicted fair value
+                - current_cof: Current actual COF
+                - deviation: Difference between predicted and current
+                - deviation_zscore: Z-score of the deviation
+                - signal: Trading signal (-1, 0, 1)
+                - adjusted_cftc: The adjusted CFTC positions value used
+        """
+        try:
+            # Adjust CFTC positions for current price
+            adjusted_cftc = self.adjust_cftc_for_current_price(current_spx_price)
+            
+            # Get current data
+            current_data = self.data.iloc[-1].copy()
+            current_cof = current_data[self.cof_term]
+            current_liquidity = current_data['fed_funds_sofr_spread']
+            
+            # Get the spline model
+            spline_model = self.spline_model
+            
+            # Create prediction using the adjusted CFTC positions
+            predicted_cof = spline_model(adjusted_cftc) + current_liquidity
+            
+            # Calculate deviation
+            deviation = predicted_cof - current_cof
+            
+            # Calculate z-score of deviation using rolling window
+            window_size = 52  # 1 year of trading weeks
+            historical_deviations = self.model_results['cof_deviation']
+            rolling_mean = historical_deviations.rolling(window=window_size, min_periods=10).mean().iloc[-1]
+            rolling_std = historical_deviations.rolling(window=window_size, min_periods=10).std().iloc[-1]
+            deviation_zscore = (deviation - rolling_mean) / rolling_std if rolling_std != 0 else 0
+            
+            return {
+                'predicted_cof': predicted_cof,
+                'current_cof': current_cof,
+                'deviation': deviation,
+                'deviation_zscore': deviation_zscore,
+                'adjusted_cftc': adjusted_cftc
+            }
+            
+        except Exception as e:
+            logger.error(f"Error predicting fair value with current price: {str(e)}")
             raise
 
 def main():
