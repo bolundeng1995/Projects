@@ -182,6 +182,7 @@ class COFTradingStrategy:
         self.trade_tracker = TradeTracker(initial_capital)
         self.position = Position()
         self.cof_term = cof_term  # The value to predict or train
+        self.lst_window_size = [13, 52, 104]
         
     def calculate_liquidity_stress(self) -> None:
         """Calculate a composite liquidity stress indicator.
@@ -241,15 +242,34 @@ class COFTradingStrategy:
             self.cof_data[f'{self.cof_term}_actual'] - self.cof_data[f'{self.cof_term}_predicted']
             )
             
-        window_size = 52
-        rolling_mean = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).mean()
-        rolling_std = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).std()
-        self.cof_data[f'{self.cof_term}_deviation_zscore'] = (
-            self.cof_data[f'{self.cof_term}_deviation'] - rolling_mean
-        ) / rolling_std
+        # window_size = 52
+        # rolling_mean = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).mean()
+        # rolling_std = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).std()
+        # self.cof_data[f'{self.cof_term}_deviation_zscore'] = (
+        #     self.cof_data[f'{self.cof_term}_deviation'] - rolling_mean
+        # ) / rolling_std
         
-        # Fill NaN values with 0
-        self.cof_data[f'{self.cof_term}_deviation_zscore'] = self.cof_data[f'{self.cof_term}_deviation_zscore'].fillna(0)
+        # # Fill NaN values with 0
+        # self.cof_data[f'{self.cof_term}_deviation_zscore'] = self.cof_data[f'{self.cof_term}_deviation_zscore'].fillna(0)
+
+        for window_size in self.lst_window_size:
+            rolling_mean = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).mean()
+            rolling_std = self.cof_data[f'{self.cof_term}_deviation'].rolling(window=window_size, min_periods=10).std()
+            self.cof_data[f'{self.cof_term}_deviation_zscore_{window_size}'] = (
+                self.cof_data[f'{self.cof_term}_deviation'] - rolling_mean
+            ) / rolling_std
+            self.cof_data[f'{self.cof_term}_deviation_mean_{window_size}'] = rolling_mean
+            self.cof_data[f'{self.cof_term}_deviation_std_{window_size}'] = rolling_std
+            
+            # Fill NaN values with 0
+            self.cof_data[f'{self.cof_term}_deviation_zscore_{window_size}'] = self.cof_data[f'{self.cof_term}_deviation_zscore_{window_size}'].fillna(0)
+
+            # get the aggregated zscore
+            self.cof_data[f'{self.cof_term}_deviation_zscore'] = self.cof_data.loc[:, [f'{self.cof_term}_deviation_zscore_{window_size}' for window_size in self.lst_window_size]].mean(axis=1)
+            self.cof_data[f'{self.cof_term}_deviation_zscore_std'] = self.cof_data.loc[:, [f'{self.cof_term}_deviation_std_{window_size}' for window_size in self.lst_window_size]].mean(axis=1)
+            self.cof_data[f'{self.cof_term}_deviation_zscore_mean'] = self.cof_data.loc[:, [f'{self.cof_term}_deviation_mean_{window_size}' for window_size in self.lst_window_size]].mean(axis=1)
+            self.cof_data[f'{self.cof_term}_deviation_zscore_up'] = self.cof_data[f'{self.cof_term}_predicted'] + self.cof_data[f'{self.cof_term}_deviation_zscore_mean'] + self.cof_data[f'{self.cof_term}_deviation_zscore_std']
+            self.cof_data[f'{self.cof_term}_deviation_zscore_down'] = self.cof_data[f'{self.cof_term}_predicted'] + self.cof_data[f'{self.cof_term}_deviation_zscore_mean'] - self.cof_data[f'{self.cof_term}_deviation_zscore_std']
 
     def _apply_signal_logic(self, entry_threshold: float, exit_threshold: float, 
                           liquidity_threshold: Optional[float] = None) -> None:
@@ -451,16 +471,25 @@ class COFTradingStrategy:
         results_df[f'{self.cof_term}_predicted'] = self.cof_data[f'{self.cof_term}_predicted']
         results_df[f'{self.cof_term}_deviation'] = self.cof_data[f'{self.cof_term}_deviation']
         results_df[f'{self.cof_term}_deviation_zscore'] = self.cof_data[f'{self.cof_term}_deviation_zscore']
+        results_df[f'{self.cof_term}_deviation_zscore_up'] = self.cof_data[f'{self.cof_term}_deviation_zscore_up']
+        results_df[f'{self.cof_term}_deviation_zscore_down'] = self.cof_data[f'{self.cof_term}_deviation_zscore_down']
+        results_df[f'{self.cof_term}_deviation_zscore_mean'] = self.cof_data[f'{self.cof_term}_deviation_zscore_mean']
+        results_df[f'{self.cof_term}_deviation_zscore_std'] = self.cof_data[f'{self.cof_term}_deviation_zscore_std']
+
+        for window_size in self.lst_window_size:
+            for stat in ['zscore', 'mean', 'std']:
+                results_df[f'{self.cof_term}_deviation_{stat}_{window_size}'] = self.cof_data[f'{self.cof_term}_deviation_{stat}_{window_size}']
         
         # Format float columns to 2 decimal places
         float_columns = ['capital', 'entry_price', 'exit_price', 'pnl', 
                         'unrealized_pnl', 'cumulative_pnl', f'{self.cof_term}_actual', 
-                        f'{self.cof_term}_predicted', f'{self.cof_term}_deviation', 
-                        f'{self.cof_term}_deviation_zscore']
+                        f'{self.cof_term}_predicted', f'{self.cof_term}_deviation'] + \
+                        [f'{self.cof_term}_deviation_{stat}' for stat in ['zscore', 'mean', 'std', 'up', 'down']] + \
+                        [f'{self.cof_term}_deviation_{stat}_{window_size}' for stat in ['zscore', 'mean', 'std'] for window_size in self.lst_window_size]
         results_df[float_columns] = results_df[float_columns].round(2)
         
-        results_df.to_csv('trading_results.csv')
-        logger.info("Trading results saved to trading_results.csv with entry and exit reasons")
+        results_df.to_csv(f'trading_results_{self.cof_term}.csv')
+        logger.info(f"Trading results saved to trading_results_{self.cof_term}.csv with entry and exit reasons")
 
     def calculate_performance_metrics(self) -> None:
         """Calculate strategy performance metrics.

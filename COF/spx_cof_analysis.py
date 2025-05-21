@@ -8,7 +8,7 @@ from sklearn.metrics import r2_score
 import logging
 from scipy.optimize import minimize
 from scipy.interpolate import UnivariateSpline, BSpline, make_smoothing_spline, make_lsq_spline
-from sklearn.model_selection import KFold
+from sklearn.model_selection import ShuffleSplit
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -69,17 +69,16 @@ class SPXCOFAnalyzer:
         y_pred = X @ params  # Matrix multiplication for prediction
         return np.sum((y - y_pred) ** 2)
     
-    def _find_optimal_smoothing(self, X, y, n_splits=10):
+    def _find_optimal_smoothing(self, X, y, n_splits=20):
         """Find optimal smoothing parameter using cross-validation"""
-        from scipy.interpolate import make_smoothing_spline
-        from sklearn.model_selection import KFold
+
         
         # Define range of smoothing parameters to try - using log spacing
         smoothing_factors = np.logspace(4, 7, 30)  # 30 values from 10000 to 10000000 on log scale
         cv_scores = []
         
         # Use K-fold cross-validation without shuffling for time series
-        kf = KFold(n_splits=n_splits, shuffle=False)
+        kf = ShuffleSplit(n_splits=n_splits, test_size=0.05, random_state=1)
         
         for s in smoothing_factors:
             scores = []
@@ -131,12 +130,14 @@ class SPXCOFAnalyzer:
             
             # Find optimal smoothing
             best_s, smoothing_factors, cv_scores = self._find_optimal_smoothing(X_sorted, y_sorted)
-            
+
+            # Update the model with optimal smoothing
+            self.optimal_smoothing = best_s
             # Create figure with two subplots
             fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
             
             # Plot 1: Different smoothing levels
-            smoothing_levels = [5e3, best_s, 1e7]  # low, optimal, high
+            smoothing_levels = [2e3, best_s, 1e8]  # low, optimal, high
             colors = ['blue', 'red', 'green']
             labels = ['Low Smoothing', 'Optimal Smoothing', 'High Smoothing']
             
@@ -194,16 +195,9 @@ class SPXCOFAnalyzer:
                 pairs.sort(key=lambda x: x[0])  # Sort by X value
                 X_sorted = pd.DataFrame({'cftc_positions': [x for x, _ in pairs]})
                 y_sorted = pd.Series([y for _, y in pairs], index=X_sorted.index)
-                
-                # Find optimal smoothing for this window
-                best_s, _, _ = self._find_optimal_smoothing(
-                    X_sorted['cftc_positions'].values,
-                    y_sorted.values,
-                    n_splits=min(10, window_size//10)
-                )
-                
+                               
                 # Create spline with optimal smoothing
-                spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=best_s)
+                spline = make_smoothing_spline(X_sorted['cftc_positions'], y_sorted, lam=self.optimal_smoothing)
                 
                 # Store the spline model for the latest window
                 if i == len(self.data) - 1:
@@ -222,7 +216,7 @@ class SPXCOFAnalyzer:
                     'cof_actual': self.data[self.cof_term].iloc[i],
                     'cof_predicted': cof_predicted + self.data['fed_funds_sofr_spread'].iloc[i],
                     'r_squared': r_squared,
-                    'spline_smoothing': best_s
+                    'spline_smoothing': self.optimal_smoothing
                 })
             
             self.model_results = pd.DataFrame(results).set_index('date')
@@ -254,7 +248,7 @@ class SPXCOFAnalyzer:
             liquidity_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].corr()
             
             # Calculate rolling correlation
-            window_size = 26  # 6 months
+            window_size = 13  # 3 months
             rolling_corr = analysis_data[['cof_deviation', 'fed_funds_sofr_spread']].rolling(window_size).corr()
             
             # Store results
@@ -407,7 +401,7 @@ def main():
     analyzer = SPXCOFAnalyzer(cof_term="1Y COF")  # Can be changed to any COF term
     
     # Load data from Excel
-    analyzer.load_data_from_excel('COF_DATA.xlsx')
+    analyzer.load_data_from_excel(r'F:\geds\hedgefundgroup\ENG\EFI\4 - Bolun\12. Data\COF Backtesting.xlsx')
     
     # Visualize smoothing trade-off
     analyzer.visualize_smoothing_tradeoff()
